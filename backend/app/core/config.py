@@ -6,9 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "LevelMind API"
     app_env: str = "development"
-    database_url: str = (
-        "postgresql+psycopg://user:password@localhost:5432/levelmind"
-    )
+    database_url: str
 
     model_config = SettingsConfigDict(
         env_file=".env",
