@@ -193,8 +193,8 @@ Ante cada tarea:
 11. Explicitar los supuestos realizados.
 12. Si una tarea entra en conflicto con la documentación arquitectónica, detenerse y señalar el conflicto en vez de decidir silenciosamente.
 13. Si la tarea fue completada correctamente, crear un único commit coherente siguiendo Conventional Commits y hacer push de la rama actual, salvo que la instrucción de la tarea indique explícitamente lo contrario.
-15. Informar el SHA del commit y el resultado del push.
-16. No combinar cambios no relacionados en el mismo commit.
+14. Informar el SHA del commit y el resultado del push.
+15. No combinar cambios no relacionados en el mismo commit.
 
 Preservar los cambios preexistentes del usuario y no modificar archivos fuera del alcance de la tarea.
 

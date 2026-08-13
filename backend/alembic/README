@@ -1,0 +1,4 @@
+Alembic administra los cambios permanentes del esquema de LevelMind.
+
+La URL de PostgreSQL se obtiene de DATABASE_URL mediante la configuración de la
+aplicación. La carpeta versions no contiene migraciones de dominio todavía.

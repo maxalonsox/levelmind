@@ -1,0 +1,1 @@
+"""LevelMind backend application."""
