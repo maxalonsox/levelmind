@@ -7,8 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field
 class GoalCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    user_id: uuid.UUID
-
     title: str = Field(
         min_length=1,
         max_length=200,

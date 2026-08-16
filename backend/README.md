@@ -26,8 +26,8 @@ cp .env.example .env
 ```
 
 El archivo `.env` está ignorado por Git y nunca debe commitearse. `DATABASE_URL`
-es la única configuración de conexión a PostgreSQL y debe usar el dialecto de
-SQLAlchemy para psycopg 3:
+configura la conexión a PostgreSQL y debe usar el dialecto de SQLAlchemy para
+psycopg 3:
 
 ```dotenv
 DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:PORT/DATABASE
@@ -39,6 +39,13 @@ panel, colocarla únicamente en el `.env` local y adaptar el esquema inicial a
 provistos por Supabase y codificar como URL los caracteres especiales de la
 contraseña. No copiar credenciales en el código, la documentación ni Git.
 
+`SUPABASE_URL` identifica el proyecto de Supabase Auth. El backend deriva de
+esta URL el issuer y el endpoint JWKS usados para verificar access tokens:
+
+```dotenv
+SUPABASE_URL=https://your-project-ref.supabase.co
+```
+
 ## Ejecutar la API
 
 Con el entorno virtual activo y desde `backend/`:
@@ -47,12 +54,16 @@ Con el entorno virtual activo y desde `backend/`:
 uvicorn app.main:app --reload
 ```
 
-La API expone dos verificaciones:
+La API expone dos verificaciones públicas:
 
 - `GET /health` confirma que la aplicación FastAPI está disponible, sin acceder
   a PostgreSQL.
 - `GET /ready` ejecuta un `SELECT 1` para confirmar que SQLAlchemy y psycopg
   pueden comunicarse con PostgreSQL. Devuelve HTTP 503 si la conexión falla.
+
+`POST /goals` requiere un access token de Supabase Auth mediante
+`Authorization: Bearer <token>`. El propietario del Goal se obtiene del claim
+`sub` verificado; `user_id` no forma parte del body.
 
 Probarlas manualmente con:
 
@@ -67,8 +78,9 @@ curl http://127.0.0.1:8000/ready
 pytest
 ```
 
-Los tests de health y readiness no requieren una base de datos activa; el
-chequeo de conexión se reemplaza durante las pruebas de `/ready`.
+Los tests no requieren una base de datos activa ni un proyecto Supabase real.
+La persistencia de Goals usa SQLite en memoria, la identidad autenticada se
+reemplaza mediante dependency overrides y el chequeo de `/ready` se aísla.
 
 ## Alembic
 
