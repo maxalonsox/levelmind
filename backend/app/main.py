@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.api.goals import router as goals_router
 from app.api.health import router as health_router
 from app.api.readiness import router as readiness_router
 from app.core.config import get_settings
@@ -7,5 +8,7 @@ from app.core.config import get_settings
 settings = get_settings()
 
 app = FastAPI(title=settings.app_name)
+
 app.include_router(health_router)
 app.include_router(readiness_router)
+app.include_router(goals_router)
