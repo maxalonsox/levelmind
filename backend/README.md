@@ -96,6 +96,7 @@ La estructura de planificación expone estos endpoints, también autenticados:
 - `GET /goals/{goal_id}/plan`
 - `POST /tasks/{task_id}/result`
 - `POST /goals/{goal_id}/evaluation/preview`
+- `POST /goals/{goal_id}/adaptation/preview`
 
 Las consultas devuelven únicamente recursos del usuario autenticado y ordenan
 los resultados por `order_index` ascendente.
@@ -155,11 +156,26 @@ curl -X POST \
   -H "Authorization: Bearer <SUPABASE_ACCESS_TOKEN>"
 ```
 
-El flujo diario queda: registrar resultados de Tasks, consultar el plan y luego
-solicitar el preview de evaluación. Si hay menos de 2 Tasks resueltas, o hay
-exactamente 2 pero representan menos del 20% del plan, la API devuelve
-`insufficient_data` sin construir ni invocar al proveedor de IA. La evaluación
-no se persiste y no modifica Goals, Stages, Missions ni Tasks.
+Solicitar una propuesta estructurada de adaptación a partir de la evaluación y
+el plan vivo:
+
+```bash
+curl -X POST \
+  http://127.0.0.1:8000/goals/<GOAL_ID>/adaptation/preview \
+  -H "Authorization: Bearer <SUPABASE_ACCESS_TOKEN>"
+```
+
+El flujo diario queda: registrar resultados de Tasks, consultar el plan,
+solicitar el preview de evaluación y, cuando corresponda, solicitar el preview
+de adaptación. Si hay menos de 2 Tasks resueltas, o hay exactamente 2 pero
+representan menos del 20% del plan, la evaluación devuelve `insufficient_data`.
+Si el resultado validado tiene `needs_adaptation=false`, el preview de
+adaptación responde `no_change` sin construir ni invocar su proveedor de IA.
+
+Ambos previews son de solo lectura. La propuesta usa índices de orden y títulos
+en lugar de UUIDs para identificar targets, se valida contra el plan vivo y no
+se persiste ni aplica. Todavía no existe un endpoint de aceptación de
+adaptaciones.
 
 Probarlas manualmente con:
 

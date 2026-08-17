@@ -1,0 +1,331 @@
+import asyncio
+from typing import Any
+from uuid import UUID, uuid4
+
+import pytest
+from httpx import ASGITransport, AsyncClient, Response
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.ai.adaptation.contracts import AdaptationContext
+from app.ai.adaptation.errors import AdaptationProviderTimeoutError
+from app.ai.errors import AIConfigurationError
+from app.ai.evaluation.contracts import EvaluationContext, EvaluationResult
+from app.api.adaptation_preview import get_adaptation_provider_factory
+from app.api.evaluation_preview import get_evaluation_provider_factory
+from app.main import app
+from app.models.goal import Goal
+from app.models.mission import Mission
+from app.models.stage import Stage
+from app.models.task import Task
+
+
+async def post_adaptation(goal_id: UUID) -> Response:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        return await client.post(f"/goals/{goal_id}/adaptation/preview")
+
+
+def persist_goal(db: Session, user_id: UUID) -> Goal:
+    goal = Goal(
+        user_id=user_id,
+        title="Become a backend developer",
+        current_situation="I know Python fundamentals",
+        expected_outcome="Build production APIs",
+        target_timeframe="Six months",
+        availability="Eight hours per week",
+    )
+    db.add(goal)
+    db.commit()
+    return goal
+
+
+def persist_plan(db: Session, goal: Goal) -> list[Task]:
+    stage = Stage(goal_id=goal.id, title="Backend", order_index=0)
+    mission = Mission(title="API delivery", order_index=0)
+    mission.tasks = [
+        Task(
+            title=f"Completed {index}",
+            order_index=index,
+            status="completed",
+            difficulty_feedback="difficult",
+            feedback_text="This required repeated debugging.",
+            xp_reward=10,
+        )
+        for index in range(3)
+    ]
+    mission.tasks.append(
+        Task(
+            title="Implement endpoint",
+            order_index=3,
+            estimated_duration_minutes=45,
+            xp_reward=10,
+        )
+    )
+    stage.missions.append(mission)
+    db.add(stage)
+    db.commit()
+    return mission.tasks
+
+
+def evaluation_result(*, needs_adaptation: bool) -> EvaluationResult:
+    return EvaluationResult(
+        status="struggling" if needs_adaptation else "on_track",
+        summary="Execution evidence was evaluated.",
+        signals=(
+            [
+                {
+                    "type": "high_difficulty",
+                    "description": "Three Tasks were marked difficult.",
+                    "severity": "high",
+                }
+            ]
+            if needs_adaptation
+            else []
+        ),
+        needs_adaptation=needs_adaptation,
+    )
+
+
+def proposal(*, task_order_index: int = 3) -> dict[str, Any]:
+    return {
+        "decision": "propose_changes",
+        "summary": "Increase one duration estimate.",
+        "rationale": "Repeated difficulty supports one bounded adjustment.",
+        "changes": [
+            {
+                "type": "adjust_task_duration",
+                "target": {
+                    "stage_order_index": 0,
+                    "stage_title": "Backend",
+                    "mission_order_index": 0,
+                    "mission_title": "API delivery",
+                    "task_order_index": task_order_index,
+                    "task_title": "Implement endpoint",
+                },
+                "reason": "The existing estimate is optimistic.",
+                "estimated_duration_minutes": 90,
+            }
+        ],
+    }
+
+
+class FakeEvaluationProvider:
+    def __init__(self, result: EvaluationResult) -> None:
+        self.result = result
+        self.contexts: list[EvaluationContext] = []
+
+    async def evaluate(self, context: EvaluationContext) -> EvaluationResult:
+        self.contexts.append(context)
+        return self.result
+
+    async def close(self) -> None:
+        pass
+
+
+class FakeAdaptationProvider:
+    def __init__(self, result: Any = None, error: Exception | None = None) -> None:
+        self.result = result
+        self.error = error
+        self.contexts: list[AdaptationContext] = []
+        self.closed = False
+
+    async def propose(self, context: AdaptationContext) -> Any:
+        self.contexts.append(context)
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def test_adaptation_preview_short_circuits_without_adaptation_provider(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    goal = persist_goal(db_session, authenticated_user_id)
+    persist_plan(db_session, goal)
+    evaluator = FakeEvaluationProvider(
+        evaluation_result(needs_adaptation=False)
+    )
+    adaptation_factory_calls = 0
+
+    def fail_if_constructed() -> FakeAdaptationProvider:
+        nonlocal adaptation_factory_calls
+        adaptation_factory_calls += 1
+        raise AssertionError("Adaptation provider must not be constructed")
+
+    app.dependency_overrides[get_evaluation_provider_factory] = (
+        lambda: lambda: evaluator
+    )
+    app.dependency_overrides[get_adaptation_provider_factory] = (
+        lambda: fail_if_constructed
+    )
+    try:
+        response = asyncio.run(post_adaptation(goal.id))
+    finally:
+        app.dependency_overrides.pop(get_evaluation_provider_factory, None)
+        app.dependency_overrides.pop(get_adaptation_provider_factory, None)
+
+    assert response.status_code == 200
+    assert response.json()["decision"] == "no_change"
+    assert response.json()["changes"] == []
+    assert adaptation_factory_calls == 0
+
+
+def test_adaptation_preview_returns_validated_proposal_without_mutation(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    goal = persist_goal(db_session, authenticated_user_id)
+    tasks = persist_plan(db_session, goal)
+    evaluator = FakeEvaluationProvider(
+        evaluation_result(needs_adaptation=True)
+    )
+    adapter = FakeAdaptationProvider(proposal())
+    before = (
+        db_session.scalar(select(func.count()).select_from(Stage)),
+        db_session.scalar(select(func.count()).select_from(Mission)),
+        db_session.scalar(select(func.count()).select_from(Task)),
+        [(task.status, task.estimated_duration_minutes) for task in tasks],
+    )
+
+    app.dependency_overrides[get_evaluation_provider_factory] = (
+        lambda: lambda: evaluator
+    )
+    app.dependency_overrides[get_adaptation_provider_factory] = (
+        lambda: lambda: adapter
+    )
+    try:
+        response = asyncio.run(post_adaptation(goal.id))
+    finally:
+        app.dependency_overrides.pop(get_evaluation_provider_factory, None)
+        app.dependency_overrides.pop(get_adaptation_provider_factory, None)
+
+    assert response.status_code == 200
+    assert response.json() == proposal()
+    assert len(adapter.contexts) == 1
+    assert adapter.closed is True
+    context_text = str(adapter.contexts[0].model_dump(mode="json"))
+    assert str(goal.id) not in context_text
+    assert str(goal.user_id) not in context_text
+    db_session.expire_all()
+    assert (
+        db_session.scalar(select(func.count()).select_from(Stage)),
+        db_session.scalar(select(func.count()).select_from(Mission)),
+        db_session.scalar(select(func.count()).select_from(Task)),
+        [
+            (task.status, task.estimated_duration_minutes)
+            for task in db_session.scalars(
+                select(Task).order_by(Task.order_index)
+            )
+        ],
+    ) == before
+
+
+def test_adaptation_preview_requires_authentication(db_session: Session) -> None:
+    goal = persist_goal(db_session, uuid4())
+
+    response = asyncio.run(post_adaptation(goal.id))
+
+    assert response.status_code == 401
+
+
+def test_adaptation_preview_hides_foreign_goal_before_providers(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    goal = persist_goal(db_session, uuid4())
+    persist_plan(db_session, goal)
+    evaluator_factory_calls = 0
+
+    def evaluator_factory() -> FakeEvaluationProvider:
+        nonlocal evaluator_factory_calls
+        evaluator_factory_calls += 1
+        return FakeEvaluationProvider(evaluation_result(needs_adaptation=True))
+
+    app.dependency_overrides[get_evaluation_provider_factory] = (
+        lambda: evaluator_factory
+    )
+    try:
+        response = asyncio.run(post_adaptation(goal.id))
+    finally:
+        app.dependency_overrides.pop(get_evaluation_provider_factory, None)
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Goal not found"}
+    assert evaluator_factory_calls == 0
+
+
+def test_adaptation_preview_maps_invalid_target_to_502(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    goal = persist_goal(db_session, authenticated_user_id)
+    persist_plan(db_session, goal)
+    evaluator = FakeEvaluationProvider(
+        evaluation_result(needs_adaptation=True)
+    )
+    adapter = FakeAdaptationProvider(proposal(task_order_index=99))
+    app.dependency_overrides[get_evaluation_provider_factory] = (
+        lambda: lambda: evaluator
+    )
+    app.dependency_overrides[get_adaptation_provider_factory] = (
+        lambda: lambda: adapter
+    )
+    try:
+        response = asyncio.run(post_adaptation(goal.id))
+    finally:
+        app.dependency_overrides.pop(get_evaluation_provider_factory, None)
+        app.dependency_overrides.pop(get_adaptation_provider_factory, None)
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "Adaptation provider returned an invalid response"
+    }
+
+
+@pytest.mark.parametrize(
+    ("factory", "expected_status", "expected_detail"),
+    [
+        (
+            lambda: (_ for _ in ()).throw(
+                AIConfigurationError("Missing AI configuration: AI_API_KEY")
+            ),
+            503,
+            "Missing AI configuration: AI_API_KEY",
+        ),
+        (
+            lambda: FakeAdaptationProvider(
+                error=AdaptationProviderTimeoutError("internal timeout")
+            ),
+            504,
+            "Adaptation provider timed out",
+        ),
+    ],
+)
+def test_adaptation_preview_maps_adaptation_errors(
+    factory,
+    expected_status: int,
+    expected_detail: str,
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    goal = persist_goal(db_session, authenticated_user_id)
+    persist_plan(db_session, goal)
+    evaluator = FakeEvaluationProvider(
+        evaluation_result(needs_adaptation=True)
+    )
+    app.dependency_overrides[get_evaluation_provider_factory] = (
+        lambda: lambda: evaluator
+    )
+    app.dependency_overrides[get_adaptation_provider_factory] = lambda: factory
+    try:
+        response = asyncio.run(post_adaptation(goal.id))
+    finally:
+        app.dependency_overrides.pop(get_evaluation_provider_factory, None)
+        app.dependency_overrides.pop(get_adaptation_provider_factory, None)
+
+    assert response.status_code == expected_status
+    assert response.json() == {"detail": expected_detail}
