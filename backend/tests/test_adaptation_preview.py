@@ -17,6 +17,7 @@ from app.main import app
 from app.models.goal import Goal
 from app.models.mission import Mission
 from app.models.plan_adaptation import PlanAdaptation
+from app.models.plan_revision import PlanRevision
 from app.models.stage import Stage
 from app.models.task import Task
 
@@ -244,9 +245,16 @@ def test_adaptation_preview_persists_validated_pending_proposal_without_mutation
     assert persisted_adaptation is not None
     assert str(persisted_adaptation.id) == payload["adaptation"]["id"]
     assert persisted_adaptation.goal_id == goal.id
+    assert persisted_adaptation.base_revision_id == UUID(
+        payload["adaptation"]["base_revision_id"]
+    )
     assert persisted_adaptation.status == "pending"
     assert persisted_adaptation.proposal == proposal()
     assert persisted_adaptation.reviewed_at is None
+    base_revision = db_session.scalar(select(PlanRevision))
+    assert base_revision is not None
+    assert base_revision.id == persisted_adaptation.base_revision_id
+    assert base_revision.revision_number == 1
     assert (
         db_session.scalar(select(func.count()).select_from(Stage)),
         db_session.scalar(select(func.count()).select_from(Mission)),

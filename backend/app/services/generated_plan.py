@@ -9,6 +9,7 @@ from app.models.stage import Stage
 from app.models.task import Task
 from app.schemas.generated_plan import GeneratedPlan, PersistedPlan
 from app.services.goal import get_owned_goal
+from app.services.plan_revision import create_plan_revision
 
 
 class GoalAlreadyHasPlanError(Exception):
@@ -32,6 +33,7 @@ def persist_generated_plan(
         stages = _build_plan_models(goal_id, generated_plan)
         db.add_all(stages)
         db.flush()
+        create_plan_revision(db, goal_id)
 
         persisted_plan = PersistedPlan.model_validate({"stages": stages})
         db.commit()

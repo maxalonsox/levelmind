@@ -13,6 +13,7 @@ class TaskCreate(BaseModel):
     description: str | None = None
     order_index: int = Field(ge=0)
     estimated_duration_minutes: int | None = Field(default=None, gt=0)
+    estimated_difficulty: Difficulty | None = None
     status: PlanningStatus = PlanningStatus.PENDING
     difficulty_feedback: Difficulty | None = None
     feedback_text: str | None = None
@@ -28,6 +29,7 @@ class TaskResponse(BaseModel):
     description: str | None
     order_index: int
     estimated_duration_minutes: int | None
+    estimated_difficulty: Difficulty | None
     status: PlanningStatus
     difficulty_feedback: Difficulty | None
     feedback_text: str | None

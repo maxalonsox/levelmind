@@ -5,7 +5,14 @@ from sqlalchemy import create_engine, pool
 
 from app.core.config import get_settings
 from app.db.base import Base
-from app.models import Goal, Mission, PlanAdaptation, Stage, Task  # noqa: F401
+from app.models import (  # noqa: F401
+    Goal,
+    Mission,
+    PlanAdaptation,
+    PlanRevision,
+    Stage,
+    Task,
+)
 
 config = context.config
 

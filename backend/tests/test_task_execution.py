@@ -82,6 +82,8 @@ def test_complete_task_records_feedback_xp_and_completes_ancestors(
         db_session, authenticated_user_id
     )
     task = tasks[0]
+    task.estimated_difficulty = "easy"
+    db_session.commit()
     provider_dependency_calls = 0
 
     def fail_if_provider_is_built() -> None:
@@ -116,6 +118,8 @@ def test_complete_task_records_feedback_xp_and_completes_ancestors(
     db_session.refresh(stage)
     db_session.refresh(goal)
     assert task.status == PlanningStatus.COMPLETED
+    assert task.estimated_difficulty == "easy"
+    assert task.difficulty_feedback == "normal"
     assert task.resolved_at is not None
     assert mission.status == PlanningStatus.COMPLETED
     assert stage.status == PlanningStatus.COMPLETED

@@ -10,6 +10,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.plan_adaptation import PlanAdaptation
+    from app.models.plan_revision import PlanRevision
     from app.models.stage import Stage
 
 
@@ -85,6 +86,11 @@ class Goal(Base):
         passive_deletes=True,
     )
     plan_adaptations: Mapped[list["PlanAdaptation"]] = relationship(
+        back_populates="goal",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    plan_revisions: Mapped[list["PlanRevision"]] = relationship(
         back_populates="goal",
         cascade="all, delete-orphan",
         passive_deletes=True,

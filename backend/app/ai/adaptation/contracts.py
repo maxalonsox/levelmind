@@ -123,6 +123,7 @@ class AdaptationTaskOutline(_AdaptationModel):
     order_index: int = Field(ge=0)
     title: str = Field(min_length=1, max_length=200)
     status: PlanningStatus
+    estimated_difficulty: Difficulty | None = None
 
 
 class AdaptationMissionOutline(_AdaptationModel):
@@ -146,6 +147,7 @@ class RelevantAdaptationTask(_AdaptationModel):
     task_title: str = Field(min_length=1, max_length=200)
     status: PlanningStatus
     estimated_duration_minutes: int | None = Field(default=None, gt=0)
+    estimated_difficulty: Difficulty | None = None
     xp_reward: int = Field(ge=0)
     difficulty_feedback: Difficulty | None = None
     feedback_text: str | None = Field(default=None, min_length=1, max_length=500)

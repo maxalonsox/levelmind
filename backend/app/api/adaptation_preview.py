@@ -32,7 +32,11 @@ from app.services.evaluation import (
     EvaluationService,
 )
 from app.services.evaluation_context import build_evaluation_context
-from app.services.plan_adaptation import persist_plan_adaptation
+from app.services.plan_adaptation import (
+    PlanRevisionConflictError,
+    persist_plan_adaptation,
+)
+from app.services.plan_revision import ensure_current_plan_revision
 
 router = APIRouter(prefix="/goals", tags=["adaptation"])
 
@@ -74,6 +78,9 @@ async def preview_goal_adaptation(
                 adaptation=None,
             )
 
+        base_revision = ensure_current_plan_revision(
+            db, goal_id, current_user.id
+        )
         adaptation_context = build_adaptation_context(
             db,
             goal_id,
@@ -87,7 +94,11 @@ async def preview_goal_adaptation(
         adaptation = None
         if proposal.decision is AdaptationDecision.PROPOSE_CHANGES:
             adaptation = persist_plan_adaptation(
-                db, goal_id, current_user.id, proposal
+                db,
+                goal_id,
+                current_user.id,
+                proposal,
+                base_revision.id,
             )
         return AdaptationPreviewResponse(
             **proposal.model_dump(),
@@ -118,4 +129,9 @@ async def preview_goal_adaptation(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Adaptation provider returned an invalid response",
+        ) from exc
+    except PlanRevisionConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Plan changed while the adaptation was generated",
         ) from exc

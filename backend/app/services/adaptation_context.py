@@ -71,6 +71,12 @@ def _load_plan(db: Session, goal_id: UUID) -> list[Stage]:
     )
 
 
+def build_current_plan_outline(
+    db: Session, goal_id: UUID
+) -> list[AdaptationStageOutline]:
+    return [_stage_outline(stage) for stage in _load_plan(db, goal_id)]
+
+
 def _task_locations(stages: list[Stage]) -> list[_TaskLocation]:
     return [
         _TaskLocation(stage=stage, mission=mission, task=task)
@@ -93,6 +99,7 @@ def _stage_outline(stage: Stage) -> AdaptationStageOutline:
                         order_index=task.order_index,
                         title=task.title,
                         status=PlanningStatus(task.status),
+                        estimated_difficulty=task.estimated_difficulty,
                     )
                     for task in sorted(
                         mission.tasks, key=lambda item: item.order_index
@@ -194,6 +201,7 @@ def _relevant_task(location: _TaskLocation) -> RelevantAdaptationTask:
         task_title=task.title,
         status=PlanningStatus(task.status),
         estimated_duration_minutes=task.estimated_duration_minutes,
+        estimated_difficulty=task.estimated_difficulty,
         xp_reward=task.xp_reward,
         difficulty_feedback=task.difficulty_feedback,
         feedback_text=feedback,

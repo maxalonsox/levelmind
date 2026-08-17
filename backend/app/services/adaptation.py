@@ -100,7 +100,16 @@ def validate_adaptation_targets(
     proposal: AdaptationProposal,
     context: AdaptationContext,
 ) -> None:
-    stages = _unique_by_index(context.plan_outline, "Stage")
+    validate_adaptation_targets_against_outline(
+        proposal, context.plan_outline
+    )
+
+
+def validate_adaptation_targets_against_outline(
+    proposal: AdaptationProposal,
+    plan_outline: list[AdaptationStageOutline],
+) -> None:
+    stages = _unique_by_index(plan_outline, "Stage")
     for change in proposal.changes:
         if isinstance(change, AddTaskChange):
             mission = _resolve_mission(stages, change.target)

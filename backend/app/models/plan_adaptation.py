@@ -31,6 +31,12 @@ class PlanAdaptation(Base):
         nullable=False,
         index=True,
     )
+    base_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("plan_revisions.id"),
+        nullable=True,
+        index=True,
+    )
     proposal: Mapped[dict[str, Any]] = mapped_column(
         JSON().with_variant(JSONB, "postgresql"),
         nullable=False,

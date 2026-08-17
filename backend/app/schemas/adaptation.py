@@ -12,6 +12,7 @@ class PlanAdaptationResponse(BaseModel):
 
     id: UUID
     goal_id: UUID
+    base_revision_id: UUID | None
     proposal: AdaptationProposal
     status: AdaptationStatus
     created_at: datetime

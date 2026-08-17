@@ -29,6 +29,11 @@ class Task(Base):
             "estimated_duration_minutes IS NULL OR estimated_duration_minutes > 0",
             name="ck_tasks_estimated_duration_minutes",
         ),
+        CheckConstraint(
+            "estimated_difficulty IS NULL OR "
+            "estimated_difficulty IN ('easy', 'normal', 'difficult')",
+            name="ck_tasks_estimated_difficulty",
+        ),
         CheckConstraint("xp_reward >= 0", name="ck_tasks_xp_reward"),
         CheckConstraint(
             "status IN ('pending', 'in_progress', 'completed', 'skipped')",
@@ -55,6 +60,9 @@ class Task(Base):
     order_index: Mapped[int] = mapped_column(Integer, nullable=False)
     estimated_duration_minutes: Mapped[int | None] = mapped_column(
         Integer, nullable=True
+    )
+    estimated_difficulty: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
     )
     status: Mapped[str] = mapped_column(
         String(20),

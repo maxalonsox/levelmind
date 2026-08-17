@@ -13,6 +13,7 @@ from app.main import app
 from app.models.enums import PlanningStatus
 from app.models.goal import Goal
 from app.models.mission import Mission
+from app.models.plan_revision import PlanRevision
 from app.models.stage import Stage
 from app.models.task import Task
 
@@ -138,6 +139,19 @@ def test_plan_accept_persists_exact_approved_hierarchy_without_llm(
     assert all(stage.status == PlanningStatus.PENDING for stage in stages)
     assert all(mission.status == PlanningStatus.PENDING for mission in missions)
     assert all(task.status == PlanningStatus.PENDING for task in tasks)
+    assert all(task.estimated_difficulty is None for task in tasks)
+
+    revision = db_session.scalar(select(PlanRevision))
+    assert revision is not None
+    assert revision.goal_id == goal.id
+    assert revision.revision_number == 1
+    assert revision.base_revision_id is None
+    assert revision.adaptation_id is None
+    snapshot_tasks = revision.snapshot["stages"][0]["missions"][0]["tasks"]
+    assert snapshot_tasks[0]["title"] == "Implement create endpoint"
+    assert "difficulty_feedback" not in snapshot_tasks[0]
+    assert "feedback_text" not in snapshot_tasks[0]
+    assert "resolved_at" not in snapshot_tasks[0]
 
     body = response.json()
     assert len(body["stages"]) == len(payload["stages"])
