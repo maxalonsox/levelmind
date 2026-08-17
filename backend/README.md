@@ -95,6 +95,7 @@ La estructura de planificación expone estos endpoints, también autenticados:
 - `POST /goals/{goal_id}/plan/accept`
 - `GET /goals/{goal_id}/plan`
 - `POST /tasks/{task_id}/result`
+- `POST /goals/{goal_id}/evaluation/preview`
 
 Las consultas devuelven únicamente recursos del usuario autenticado y ordenan
 los resultados por `order_index` ascendente.
@@ -145,6 +146,20 @@ curl -X POST http://127.0.0.1:8000/tasks/<TASK_ID>/result \
 se reciben del cliente: se calculan a partir del estado persistido de las Tasks.
 Repetir el mismo resultado es idempotente; intentar cambiar una Task terminal
 a otro resultado devuelve HTTP 409.
+
+Solicitar una evaluación estructurada y no persistente del estado observado:
+
+```bash
+curl -X POST \
+  http://127.0.0.1:8000/goals/<GOAL_ID>/evaluation/preview \
+  -H "Authorization: Bearer <SUPABASE_ACCESS_TOKEN>"
+```
+
+El flujo diario queda: registrar resultados de Tasks, consultar el plan y luego
+solicitar el preview de evaluación. Si hay menos de 2 Tasks resueltas, o hay
+exactamente 2 pero representan menos del 20% del plan, la API devuelve
+`insufficient_data` sin construir ni invocar al proveedor de IA. La evaluación
+no se persiste y no modifica Goals, Stages, Missions ni Tasks.
 
 Probarlas manualmente con:
 

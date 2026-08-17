@@ -1,23 +1,25 @@
 from openai import AsyncOpenAI
 
+from app.ai.evaluation.contracts import (
+    EvaluationContext,
+    EvaluationResult,
+)
+from app.ai.evaluation.errors import (
+    EmptyEvaluationResponseError,
+    EvaluationProviderAPIError,
+    EvaluationProviderTimeoutError,
+    InvalidEvaluationJSONError,
+    InvalidEvaluationResultError,
+)
+from app.ai.evaluation.prompts import build_evaluation_prompt
 from app.ai.openai_compatible import (
     OpenAICompatibleStructuredClient,
     StructuredProviderErrors,
 )
-from app.ai.planning.contracts import PlanningGoalInput
-from app.ai.planning.errors import (
-    EmptyPlanningResponseError,
-    InvalidGeneratedPlanError,
-    InvalidPlanningJSONError,
-    PlanningProviderAPIError,
-    PlanningProviderTimeoutError,
-)
-from app.ai.planning.prompts import build_planning_prompt
 from app.core.config import Settings
-from app.schemas.generated_plan import GeneratedPlan
 
 
-class OpenAICompatiblePlanningProvider:
+class OpenAICompatibleEvaluationProvider:
     def __init__(
         self,
         settings: Settings,
@@ -28,23 +30,23 @@ class OpenAICompatiblePlanningProvider:
     ) -> None:
         self._structured_client = OpenAICompatibleStructuredClient(
             settings,
-            output_model=GeneratedPlan,
-            operation="Planning",
-            contract_name="GeneratedPlan",
+            output_model=EvaluationResult,
+            operation="Evaluation",
+            contract_name="EvaluationResult",
             errors=StructuredProviderErrors(
-                timeout=PlanningProviderTimeoutError,
-                api=PlanningProviderAPIError,
-                empty=EmptyPlanningResponseError,
-                invalid_json=InvalidPlanningJSONError,
-                invalid_output=InvalidGeneratedPlanError,
+                timeout=EvaluationProviderTimeoutError,
+                api=EvaluationProviderAPIError,
+                empty=EmptyEvaluationResponseError,
+                invalid_json=InvalidEvaluationJSONError,
+                invalid_output=InvalidEvaluationResultError,
             ),
             client=client,
             max_attempts=max_attempts,
             retry_delay_seconds=retry_delay_seconds,
         )
 
-    async def generate_plan(self, goal: PlanningGoalInput) -> GeneratedPlan:
-        prompt = build_planning_prompt(goal)
+    async def evaluate(self, context: EvaluationContext) -> EvaluationResult:
+        prompt = build_evaluation_prompt(context)
         return await self._structured_client.generate(
             [
                 {"role": "system", "content": prompt.system},

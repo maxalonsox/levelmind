@@ -1,9 +1,8 @@
+from app.ai.errors import AIConfigurationError
+
+
 class PlanningError(Exception):
     """Base error for plan generation failures."""
-
-
-class AIConfigurationError(PlanningError):
-    """Required AI provider configuration is missing or invalid."""
 
 
 class PlanningProviderTimeoutError(PlanningError):

@@ -13,7 +13,7 @@ from openai import (
     BadRequestError,
 )
 
-from app.ai.planning import openai_compatible
+from app.ai import openai_compatible
 from app.ai.planning.contracts import PlanningGoalInput
 from app.ai.planning.errors import (
     AIConfigurationError,

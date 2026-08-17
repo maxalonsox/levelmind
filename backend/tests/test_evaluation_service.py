@@ -1,0 +1,153 @@
+import asyncio
+from typing import Any
+
+import pytest
+
+from app.ai.evaluation.contracts import (
+    EvaluationContext,
+    EvaluationFeedbackMetrics,
+    EvaluationGoalContext,
+    EvaluationMetrics,
+    EvaluationResult,
+    EvaluationStatus,
+    EvaluationTemporalMetrics,
+)
+from app.ai.evaluation.errors import InvalidEvaluationResultError
+from app.ai.evaluation.prompts import EVALUATION_SYSTEM_PROMPT
+from app.services.evaluation import EvaluationService
+
+
+def evaluation_context(
+    *,
+    total_tasks: int = 10,
+    completed_tasks: int = 3,
+    skipped_tasks: int = 0,
+) -> EvaluationContext:
+    resolved_tasks = completed_tasks + skipped_tasks
+    return EvaluationContext(
+        goal=EvaluationGoalContext(
+            title="Learn backend development",
+            current_situation="Python fundamentals",
+            expected_outcome="Build production APIs",
+            target_timeframe="Six months",
+            availability="Eight hours per week",
+        ),
+        metrics=EvaluationMetrics(
+            total_tasks=total_tasks,
+            completed_tasks=completed_tasks,
+            skipped_tasks=skipped_tasks,
+            pending_tasks=total_tasks - resolved_tasks,
+            resolved_tasks=resolved_tasks,
+            progress_percentage=round(
+                completed_tasks / total_tasks * 100, 2
+            ),
+            xp_earned=completed_tasks * 10,
+        ),
+        feedback_metrics=EvaluationFeedbackMetrics(
+            tasks_with_difficulty_feedback=resolved_tasks,
+            easy_count=0,
+            normal_count=resolved_tasks,
+            difficult_count=0,
+            tasks_with_feedback_text=0,
+            tasks_without_explicit_feedback=0,
+        ),
+        temporal_metrics=EvaluationTemporalMetrics(
+            resolved_tasks=resolved_tasks,
+            first_resolved_at=None,
+            last_resolved_at=None,
+        ),
+        missions=[],
+        feedback_samples=[],
+        deterministic_signals=[],
+    )
+
+
+def valid_result() -> EvaluationResult:
+    return EvaluationResult(
+        status="on_track",
+        summary="Observed execution is consistent with the current plan.",
+        signals=[],
+        needs_adaptation=False,
+    )
+
+
+class FakeProvider:
+    def __init__(self, result: Any) -> None:
+        self.result = result
+        self.contexts: list[EvaluationContext] = []
+        self.closed = False
+
+    async def evaluate(self, context: EvaluationContext) -> Any:
+        self.contexts.append(context)
+        return self.result
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        evaluation_context(total_tasks=4, completed_tasks=1),
+        evaluation_context(total_tasks=20, completed_tasks=2),
+    ],
+)
+def test_evaluation_service_returns_insufficient_data_without_provider(
+    context: EvaluationContext,
+) -> None:
+    factory_calls = 0
+
+    def fail_if_provider_is_constructed() -> FakeProvider:
+        nonlocal factory_calls
+        factory_calls += 1
+        raise AssertionError("Insufficient data must not construct a provider")
+
+    result = asyncio.run(
+        EvaluationService(fail_if_provider_is_constructed).evaluate(context)
+    )
+
+    assert result.status is EvaluationStatus.INSUFFICIENT_DATA
+    assert result.needs_adaptation is False
+    assert result.signals[0].type == "insufficient_data"
+    assert factory_calls == 0
+
+
+def test_evaluation_service_invokes_provider_when_evidence_is_sufficient() -> None:
+    context = evaluation_context(total_tasks=10, completed_tasks=2)
+    provider = FakeProvider(valid_result())
+
+    result = asyncio.run(
+        EvaluationService(lambda: provider).evaluate(context)
+    )
+
+    assert result == valid_result()
+    assert provider.contexts == [context]
+    assert provider.closed is True
+
+
+def test_evaluation_service_revalidates_provider_result() -> None:
+    context = evaluation_context()
+    provider = FakeProvider(
+        {
+            "status": "unsupported",
+            "summary": "Invalid status",
+            "signals": [],
+            "needs_adaptation": False,
+        }
+    )
+
+    with pytest.raises(InvalidEvaluationResultError):
+        asyncio.run(EvaluationService(lambda: provider).evaluate(context))
+
+    assert provider.closed is True
+
+
+def test_evaluation_prompt_requires_conservative_non_mutating_analysis() -> None:
+    prompt = " ".join(EVALUATION_SYSTEM_PROMPT.lower().split())
+
+    assert "never modify the plan" in prompt
+    assert "observed facts from interpretations" in prompt
+    assert "not failure" in prompt
+    assert "one difficult task is not enough" in prompt
+    assert "do not diagnose emotions, health, psychology" in prompt
+    assert "return only a json object" in prompt
