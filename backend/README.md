@@ -92,6 +92,7 @@ La estructura de planificación expone estos endpoints, también autenticados:
 - `POST /missions/{mission_id}/tasks`
 - `GET /missions/{mission_id}/tasks`
 - `POST /goals/{goal_id}/plan/preview`
+- `POST /goals/{goal_id}/plan/accept`
 
 Las consultas devuelven únicamente recursos del usuario autenticado y ordenan
 los resultados por `order_index` ascendente.
@@ -103,6 +104,20 @@ los resultados por `order_index` ascendente.
 curl -X POST http://127.0.0.1:8000/goals/<GOAL_ID>/plan/preview \
   -H "Authorization: Bearer <SUPABASE_ACCESS_TOKEN>"
 ```
+
+Después de revisar el JSON devuelto, guardar exactamente ese contenido, por
+ejemplo en `generated-plan.json`, y aceptarlo sin volver a invocar al proveedor
+de IA:
+
+```bash
+curl -X POST http://127.0.0.1:8000/goals/<GOAL_ID>/plan/accept \
+  -H "Authorization: Bearer <SUPABASE_ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d @generated-plan.json
+```
+
+La aceptación devuelve HTTP 201 con la jerarquía persistida. Si el Goal ya
+posee Stages, devuelve HTTP 409 y no agrega, reemplaza ni combina planes.
 
 Probarlas manualmente con:
 

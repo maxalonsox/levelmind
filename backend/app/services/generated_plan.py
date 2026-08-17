@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.enums import PlanningStatus
@@ -10,6 +11,10 @@ from app.schemas.generated_plan import GeneratedPlan, PersistedPlan
 from app.services.goal import get_owned_goal
 
 
+class GoalAlreadyHasPlanError(Exception):
+    """Raised when a Goal already has a persisted planning hierarchy."""
+
+
 def persist_generated_plan(
     db: Session,
     goal_id: UUID,
@@ -17,7 +22,13 @@ def persist_generated_plan(
     generated_plan: GeneratedPlan,
 ) -> PersistedPlan:
     try:
-        get_owned_goal(db, goal_id, user_id)
+        get_owned_goal(db, goal_id, user_id, for_update=True)
+        existing_stage_id = db.scalar(
+            select(Stage.id).where(Stage.goal_id == goal_id).limit(1)
+        )
+        if existing_stage_id is not None:
+            raise GoalAlreadyHasPlanError
+
         stages = _build_plan_models(goal_id, generated_plan)
         db.add_all(stages)
         db.flush()
