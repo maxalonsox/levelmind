@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import HttpUrl
+from pydantic import Field, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str
     supabase_url: HttpUrl
+    ai_base_url: HttpUrl | None = None
+    ai_api_key: SecretStr | None = None
+    ai_model: str | None = None
+    ai_timeout_seconds: float = Field(default=30.0, gt=0)
 
     model_config = SettingsConfigDict(
         env_file=".env",

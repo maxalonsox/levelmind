@@ -50,6 +50,20 @@ esta URL el issuer y el endpoint JWKS usados para verificar access tokens:
 SUPABASE_URL=https://your-project-ref.supabase.co
 ```
 
+El preview de planificación usa un proveedor con API compatible con OpenAI.
+El proveedor y el modelo se seleccionan exclusivamente mediante configuración:
+
+```dotenv
+AI_BASE_URL=https://compatible-provider.example/v1
+AI_API_KEY=replace-with-provider-api-key
+AI_MODEL=replace-with-provider-model
+AI_TIMEOUT_SECONDS=30
+```
+
+`AI_BASE_URL` es opcional; si se omite, el SDK utiliza su endpoint
+predeterminado. `AI_API_KEY` y `AI_MODEL` son obligatorios al invocar el
+Planner, pero no para levantar la API ni ejecutar los health checks.
+
 ## Ejecutar la API
 
 Con el entorno virtual activo y desde `backend/`:
@@ -77,9 +91,18 @@ La estructura de planificación expone estos endpoints, también autenticados:
 - `GET /stages/{stage_id}/missions`
 - `POST /missions/{mission_id}/tasks`
 - `GET /missions/{mission_id}/tasks`
+- `POST /goals/{goal_id}/plan/preview`
 
 Las consultas devuelven únicamente recursos del usuario autenticado y ordenan
 los resultados por `order_index` ascendente.
+
+`POST /goals/{goal_id}/plan/preview` verifica ownership y devuelve un
+`GeneratedPlan` validado sin persistir Stages, Missions ni Tasks. Ejemplo:
+
+```bash
+curl -X POST http://127.0.0.1:8000/goals/<GOAL_ID>/plan/preview \
+  -H "Authorization: Bearer <SUPABASE_ACCESS_TOKEN>"
+```
 
 Probarlas manualmente con:
 
@@ -94,9 +117,10 @@ curl http://127.0.0.1:8000/ready
 pytest
 ```
 
-Los tests no requieren una base de datos activa ni un proyecto Supabase real.
-La persistencia usa SQLite en memoria, la identidad autenticada se reemplaza
-mediante dependency overrides y el chequeo de `/ready` se aísla.
+Los tests no requieren una base de datos activa, un proyecto Supabase real ni
+acceso a un proveedor de IA. La persistencia usa SQLite en memoria, la identidad
+autenticada y el proveedor se reemplazan mediante dependency overrides, y el
+chequeo de `/ready` se aísla.
 
 ## Alembic
 
