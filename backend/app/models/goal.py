@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.plan_adaptation import PlanAdaptation
     from app.models.stage import Stage
 
 
@@ -79,6 +80,11 @@ class Goal(Base):
     )
 
     stages: Mapped[list["Stage"]] = relationship(
+        back_populates="goal",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    plan_adaptations: Mapped[list["PlanAdaptation"]] = relationship(
         back_populates="goal",
         cascade="all, delete-orphan",
         passive_deletes=True,

@@ -16,6 +16,7 @@ from app.api.evaluation_preview import get_evaluation_provider_factory
 from app.main import app
 from app.models.goal import Goal
 from app.models.mission import Mission
+from app.models.plan_adaptation import PlanAdaptation
 from app.models.stage import Stage
 from app.models.task import Task
 
@@ -110,6 +111,15 @@ def proposal(*, task_order_index: int = 3) -> dict[str, Any]:
     }
 
 
+def no_change_proposal() -> dict[str, Any]:
+    return {
+        "decision": "no_change",
+        "summary": "No safe plan change was identified.",
+        "rationale": "The evidence does not support a concrete target change.",
+        "changes": [],
+    }
+
+
 class FakeEvaluationProvider:
     def __init__(self, result: EvaluationResult) -> None:
         self.result = result
@@ -169,12 +179,20 @@ def test_adaptation_preview_short_circuits_without_adaptation_provider(
         app.dependency_overrides.pop(get_adaptation_provider_factory, None)
 
     assert response.status_code == 200
+    assert response.json()["needs_adaptation"] is False
     assert response.json()["decision"] == "no_change"
     assert response.json()["changes"] == []
+    assert response.json()["adaptation"] is None
     assert adaptation_factory_calls == 0
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(PlanAdaptation)
+        )
+        == 0
+    )
 
 
-def test_adaptation_preview_returns_validated_proposal_without_mutation(
+def test_adaptation_preview_persists_validated_pending_proposal_without_mutation(
     db_session: Session,
     authenticated_user_id: UUID,
 ) -> None:
@@ -204,13 +222,31 @@ def test_adaptation_preview_returns_validated_proposal_without_mutation(
         app.dependency_overrides.pop(get_adaptation_provider_factory, None)
 
     assert response.status_code == 200
-    assert response.json() == proposal()
+    payload = response.json()
+    assert payload["needs_adaptation"] is True
+    assert {
+        key: payload[key]
+        for key in ("decision", "summary", "rationale", "changes")
+    } == proposal()
+    assert payload["adaptation"]["goal_id"] == str(goal.id)
+    assert payload["adaptation"]["proposal"] == proposal()
+    assert payload["adaptation"]["status"] == "pending"
+    assert payload["adaptation"]["reviewed_at"] is None
+    assert payload["adaptation"]["created_at"] is not None
+    assert payload["adaptation"]["updated_at"] is not None
     assert len(adapter.contexts) == 1
     assert adapter.closed is True
     context_text = str(adapter.contexts[0].model_dump(mode="json"))
     assert str(goal.id) not in context_text
     assert str(goal.user_id) not in context_text
     db_session.expire_all()
+    persisted_adaptation = db_session.scalar(select(PlanAdaptation))
+    assert persisted_adaptation is not None
+    assert str(persisted_adaptation.id) == payload["adaptation"]["id"]
+    assert persisted_adaptation.goal_id == goal.id
+    assert persisted_adaptation.status == "pending"
+    assert persisted_adaptation.proposal == proposal()
+    assert persisted_adaptation.reviewed_at is None
     assert (
         db_session.scalar(select(func.count()).select_from(Stage)),
         db_session.scalar(select(func.count()).select_from(Mission)),
@@ -222,6 +258,43 @@ def test_adaptation_preview_returns_validated_proposal_without_mutation(
             )
         ],
     ) == before
+
+
+def test_adaptation_preview_does_not_persist_provider_no_change_proposal(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    goal = persist_goal(db_session, authenticated_user_id)
+    persist_plan(db_session, goal)
+    evaluator = FakeEvaluationProvider(
+        evaluation_result(needs_adaptation=True)
+    )
+    adapter = FakeAdaptationProvider(no_change_proposal())
+
+    app.dependency_overrides[get_evaluation_provider_factory] = (
+        lambda: lambda: evaluator
+    )
+    app.dependency_overrides[get_adaptation_provider_factory] = (
+        lambda: lambda: adapter
+    )
+    try:
+        response = asyncio.run(post_adaptation(goal.id))
+    finally:
+        app.dependency_overrides.pop(get_evaluation_provider_factory, None)
+        app.dependency_overrides.pop(get_adaptation_provider_factory, None)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        **no_change_proposal(),
+        "needs_adaptation": True,
+        "adaptation": None,
+    }
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(PlanAdaptation)
+        )
+        == 0
+    )
 
 
 def test_adaptation_preview_requires_authentication(db_session: Session) -> None:
@@ -256,6 +329,12 @@ def test_adaptation_preview_hides_foreign_goal_before_providers(
     assert response.status_code == 404
     assert response.json() == {"detail": "Goal not found"}
     assert evaluator_factory_calls == 0
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(PlanAdaptation)
+        )
+        == 0
+    )
 
 
 def test_adaptation_preview_maps_invalid_target_to_502(
@@ -284,6 +363,54 @@ def test_adaptation_preview_maps_invalid_target_to_502(
     assert response.json() == {
         "detail": "Adaptation provider returned an invalid response"
     }
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(PlanAdaptation)
+        )
+        == 0
+    )
+
+
+def test_adaptation_preview_does_not_persist_invalid_provider_response(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    goal = persist_goal(db_session, authenticated_user_id)
+    persist_plan(db_session, goal)
+    evaluator = FakeEvaluationProvider(
+        evaluation_result(needs_adaptation=True)
+    )
+    adapter = FakeAdaptationProvider(
+        {
+            "decision": "propose_changes",
+            "summary": "Invalid proposal",
+            "rationale": "The changes required by this decision are absent.",
+            "changes": [],
+        }
+    )
+    app.dependency_overrides[get_evaluation_provider_factory] = (
+        lambda: lambda: evaluator
+    )
+    app.dependency_overrides[get_adaptation_provider_factory] = (
+        lambda: lambda: adapter
+    )
+    try:
+        response = asyncio.run(post_adaptation(goal.id))
+    finally:
+        app.dependency_overrides.pop(get_evaluation_provider_factory, None)
+        app.dependency_overrides.pop(get_adaptation_provider_factory, None)
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "Adaptation provider returned an invalid response"
+    }
+    assert adapter.closed is True
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(PlanAdaptation)
+        )
+        == 0
+    )
 
 
 @pytest.mark.parametrize(

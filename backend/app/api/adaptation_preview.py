@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.ai.adaptation.contracts import AdaptationProposal
+from app.ai.adaptation.contracts import AdaptationDecision
 from app.ai.adaptation.errors import (
     AdaptationError,
     AdaptationProviderTimeoutError,
@@ -21,6 +21,7 @@ from app.api.evaluation_preview import get_evaluation_provider_factory
 from app.auth import AuthenticatedUser, get_current_user
 from app.core.config import get_settings
 from app.db.session import get_db
+from app.schemas.adaptation import AdaptationPreviewResponse
 from app.services.adaptation import (
     AdaptationProviderFactory,
     AdaptationService,
@@ -31,6 +32,7 @@ from app.services.evaluation import (
     EvaluationService,
 )
 from app.services.evaluation_context import build_evaluation_context
+from app.services.plan_adaptation import persist_plan_adaptation
 
 router = APIRouter(prefix="/goals", tags=["adaptation"])
 
@@ -41,7 +43,7 @@ def get_adaptation_provider_factory() -> AdaptationProviderFactory:
 
 @router.post(
     "/{goal_id}/adaptation/preview",
-    response_model=AdaptationProposal,
+    response_model=AdaptationPreviewResponse,
 )
 async def preview_goal_adaptation(
     goal_id: UUID,
@@ -55,7 +57,7 @@ async def preview_goal_adaptation(
         AdaptationProviderFactory,
         Depends(get_adaptation_provider_factory),
     ],
-) -> AdaptationProposal:
+) -> AdaptationPreviewResponse:
     evaluation_context = build_evaluation_context(
         db, goal_id, current_user.id
     )
@@ -65,7 +67,12 @@ async def preview_goal_adaptation(
         ).evaluate(evaluation_context)
         adaptation_service = AdaptationService(adaptation_provider_factory)
         if not evaluation.needs_adaptation:
-            return await adaptation_service.propose(evaluation)
+            proposal = await adaptation_service.propose(evaluation)
+            return AdaptationPreviewResponse(
+                **proposal.model_dump(),
+                needs_adaptation=evaluation.needs_adaptation,
+                adaptation=None,
+            )
 
         adaptation_context = build_adaptation_context(
             db,
@@ -74,8 +81,18 @@ async def preview_goal_adaptation(
             evaluation_context,
             evaluation,
         )
-        return await adaptation_service.propose(
+        proposal = await adaptation_service.propose(
             evaluation, adaptation_context
+        )
+        adaptation = None
+        if proposal.decision is AdaptationDecision.PROPOSE_CHANGES:
+            adaptation = persist_plan_adaptation(
+                db, goal_id, current_user.id, proposal
+            )
+        return AdaptationPreviewResponse(
+            **proposal.model_dump(),
+            needs_adaptation=evaluation.needs_adaptation,
+            adaptation=adaptation,
         )
     except AIConfigurationError as exc:
         raise HTTPException(

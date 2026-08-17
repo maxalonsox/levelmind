@@ -170,12 +170,16 @@ solicitar el preview de evaluación y, cuando corresponda, solicitar el preview
 de adaptación. Si hay menos de 2 Tasks resueltas, o hay exactamente 2 pero
 representan menos del 20% del plan, la evaluación devuelve `insufficient_data`.
 Si el resultado validado tiene `needs_adaptation=false`, el preview de
-adaptación responde `no_change` sin construir ni invocar su proveedor de IA.
+adaptación responde con `needs_adaptation=false`, un proposal `no_change` y
+`adaptation=null`, sin construir ni invocar su proveedor de IA. Cuando el
+proposal validado contiene cambios, se guarda como una `PlanAdaptation`
+`pending` y la respuesta la expone en `adaptation`. Los campos existentes del
+proposal permanecen en el nivel superior del response.
 
-Ambos previews son de solo lectura. La propuesta usa índices de orden y títulos
-en lugar de UUIDs para identificar targets, se valida contra el plan vivo y no
-se persiste ni aplica. Todavía no existe un endpoint de aceptación de
-adaptaciones.
+El preview de evaluación es de solo lectura. La propuesta de adaptación usa
+índices de orden y títulos en lugar de UUIDs para identificar targets, se valida
+contra el plan vivo y se persiste para revisión HITL, pero no se aplica.
+Todavía no existen endpoints de aceptación o rechazo de adaptaciones.
 
 Probarlas manualmente con:
 

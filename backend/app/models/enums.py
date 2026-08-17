@@ -17,3 +17,9 @@ class Difficulty(StrEnum):
 class TaskResult(StrEnum):
     COMPLETED = "completed"
     SKIPPED = "skipped"
+
+
+class AdaptationStatus(StrEnum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
