@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.ai.adaptation.contracts import AdaptationProposal
 from app.models.enums import AdaptationStatus
@@ -23,3 +23,12 @@ class PlanAdaptationResponse(BaseModel):
 class AdaptationPreviewResponse(AdaptationProposal):
     needs_adaptation: bool
     adaptation: PlanAdaptationResponse | None
+
+
+class AdaptationAcceptResponse(BaseModel):
+    adaptation_id: UUID
+    status: AdaptationStatus
+    reviewed_at: datetime
+    revision_id: UUID
+    revision_number: int = Field(gt=0)
+    applied_change_count: int = Field(gt=0)

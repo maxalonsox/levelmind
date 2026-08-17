@@ -97,6 +97,7 @@ La estructura de planificación expone estos endpoints, también autenticados:
 - `POST /tasks/{task_id}/result`
 - `POST /goals/{goal_id}/evaluation/preview`
 - `POST /goals/{goal_id}/adaptation/preview`
+- `POST /goals/{goal_id}/adaptations/{adaptation_id}/accept`
 
 Las consultas devuelven únicamente recursos del usuario autenticado y ordenan
 los resultados por `order_index` ascendente.
@@ -179,7 +180,21 @@ proposal permanecen en el nivel superior del response.
 El preview de evaluación es de solo lectura. La propuesta de adaptación usa
 índices de orden y títulos en lugar de UUIDs para identificar targets, se valida
 contra el plan vivo y se persiste para revisión HITL, pero no se aplica.
-Todavía no existen endpoints de aceptación o rechazo de adaptaciones.
+El plan aceptado inicialmente crea la revisión base. Para planes existentes, la
+primera revisión se crea de forma lazy antes de generar una nueva adaptación.
+Cada adaptación queda vinculada a esa revisión y sólo puede aceptarse si sigue
+siendo la revisión vigente:
+
+```bash
+curl -X POST \
+  http://127.0.0.1:8000/goals/<GOAL_ID>/adaptations/<ADAPTATION_ID>/accept \
+  -H "Authorization: Bearer <SUPABASE_ACCESS_TOKEN>"
+```
+
+La aceptación no invoca IA: revalida y aplica atómicamente el proposal
+persistido, marca la adaptación como `accepted` y crea la siguiente revisión
+inmutable del plan. Una adaptación ya revisada, obsoleta o con targets que ya no
+coinciden devuelve HTTP 409. Todavía no existe un endpoint de rechazo.
 
 Probarlas manualmente con:
 
