@@ -12,3 +12,8 @@ class Difficulty(StrEnum):
     EASY = "easy"
     NORMAL = "normal"
     DIFFICULT = "difficult"
+
+
+class TaskResult(StrEnum):
+    COMPLETED = "completed"
+    SKIPPED = "skipped"

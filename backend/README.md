@@ -93,6 +93,8 @@ La estructura de planificación expone estos endpoints, también autenticados:
 - `GET /missions/{mission_id}/tasks`
 - `POST /goals/{goal_id}/plan/preview`
 - `POST /goals/{goal_id}/plan/accept`
+- `GET /goals/{goal_id}/plan`
+- `POST /tasks/{task_id}/result`
 
 Las consultas devuelven únicamente recursos del usuario autenticado y ordenan
 los resultados por `order_index` ascendente.
@@ -118,6 +120,31 @@ curl -X POST http://127.0.0.1:8000/goals/<GOAL_ID>/plan/accept \
 
 La aceptación devuelve HTTP 201 con la jerarquía persistida. Si el Goal ya
 posee Stages, devuelve HTTP 409 y no agrega, reemplaza ni combina planes.
+
+Consultar el plan vivo, sus estados, el progreso derivado y el XP obtenido:
+
+```bash
+curl http://127.0.0.1:8000/goals/<GOAL_ID>/plan \
+  -H "Authorization: Bearer <SUPABASE_ACCESS_TOKEN>"
+```
+
+Registrar el resultado y feedback explícito de una Task:
+
+```bash
+curl -X POST http://127.0.0.1:8000/tasks/<TASK_ID>/result \
+  -H "Authorization: Bearer <SUPABASE_ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "result": "completed",
+    "difficulty_feedback": "normal",
+    "feedback_text": "La validación requirió más debugging del esperado."
+  }'
+```
+
+`result` admite únicamente `completed` o `skipped`. El XP y el porcentaje no
+se reciben del cliente: se calculan a partir del estado persistido de las Tasks.
+Repetir el mismo resultado es idempotente; intentar cambiar una Task terminal
+a otro resultado devuelve HTTP 409.
 
 Probarlas manualmente con:
 

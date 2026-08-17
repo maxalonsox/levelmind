@@ -66,6 +66,9 @@ class Task(Base):
         String(20), nullable=True
     )
     feedback_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     xp_reward: Mapped[int] = mapped_column(
         Integer, nullable=False, default=10, server_default="10"
     )

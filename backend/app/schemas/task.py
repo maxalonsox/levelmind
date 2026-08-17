@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import Difficulty, PlanningStatus
+from app.models.enums import Difficulty, PlanningStatus, TaskResult
 
 
 class TaskCreate(BaseModel):
@@ -31,6 +31,23 @@ class TaskResponse(BaseModel):
     status: PlanningStatus
     difficulty_feedback: Difficulty | None
     feedback_text: str | None
+    resolved_at: datetime | None
     xp_reward: int
     created_at: datetime
     updated_at: datetime
+
+
+class TaskResultCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    result: TaskResult
+    difficulty_feedback: Difficulty | None = None
+    feedback_text: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2000,
+    )
+
+
+class TaskResultResponse(TaskResponse):
+    xp_awarded: int = Field(ge=0)
