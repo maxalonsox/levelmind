@@ -187,6 +187,26 @@ def test_evaluation_provider_falls_back_to_json_object() -> None:
     }
 
 
+def test_evaluation_provider_recovers_from_sdk_structured_parser_error() -> None:
+    completions = StubCompletions(
+        parse_results=[TypeError("'NoneType' object is not iterable")],
+        create_results=[
+            completion(content=json.dumps(valid_result_payload()))
+        ],
+    )
+
+    result = asyncio.run(
+        provider_with(completions).evaluate(evaluation_context())
+    )
+
+    assert isinstance(result, EvaluationResult)
+    assert len(completions.parse_calls) == 1
+    assert len(completions.create_calls) == 1
+    assert completions.create_calls[0]["response_format"] == {
+        "type": "json_object"
+    }
+
+
 def test_evaluation_provider_falls_back_to_plain_json() -> None:
     completions = StubCompletions(
         parse_results=[api_error(BadRequestError, 400)],

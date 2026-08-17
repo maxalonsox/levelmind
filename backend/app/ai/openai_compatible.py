@@ -30,6 +30,12 @@ class _ResponseMode(StrEnum):
     PLAIN_JSON = "plain_json"
 
 
+class _StructuredOutputCompatibilityError(Exception):
+    def __init__(self, exception_type: str) -> None:
+        super().__init__("Structured output parsing is incompatible")
+        self.exception_type = exception_type
+
+
 @dataclass(frozen=True)
 class StructuredProviderErrors:
     timeout: type[Exception]
@@ -101,6 +107,22 @@ class OpenAICompatibleStructuredClient(Generic[OutputModel]):
         for attempt in range(1, self._max_attempts + 1):
             try:
                 result = await self._request(messages, mode)
+            except _StructuredOutputCompatibilityError as exc:
+                fallback_mode = self._next_mode(mode)
+                logger.warning(
+                    "%s structured output mode failed; using fallback",
+                    self._operation,
+                    extra={
+                        "ai_model": self._model,
+                        "attempt": attempt,
+                        "response_mode": "structured_output",
+                        "next_response_mode": fallback_mode.value,
+                        "error_type": exc.exception_type,
+                        "exception_type": exc.exception_type,
+                    },
+                )
+                mode = fallback_mode
+                continue
             except APITimeoutError as exc:
                 if await self._retry_transient(attempt, exc):
                     continue
@@ -191,9 +213,15 @@ class OpenAICompatibleStructuredClient(Generic[OutputModel]):
                     messages=messages,
                     response_format=self._output_model,
                 )
-            except ValidationError as exc:
-                raise self._errors.invalid_output(
-                    self._invalid_output_message
+            except (
+                AttributeError,
+                IndexError,
+                KeyError,
+                TypeError,
+                ValidationError,
+            ) as exc:
+                raise _StructuredOutputCompatibilityError(
+                    type(exc).__name__
                 ) from exc
             message = self._first_message(completion)
             if message.parsed is not None:

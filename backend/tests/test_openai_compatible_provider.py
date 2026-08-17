@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from collections.abc import Sequence
 from types import SimpleNamespace
 from typing import Any, cast
@@ -184,6 +185,71 @@ def test_provider_falls_back_to_json_mode() -> None:
     assert completions.create_calls[0]["response_format"] == {
         "type": "json_object"
     }
+
+
+def test_provider_falls_back_when_sdk_structured_parser_raises_type_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    parser_error = TypeError("'NoneType' object is not iterable")
+    completions = StubCompletions(
+        parse_results=[parser_error],
+        create_results=[completion(content=json.dumps(valid_plan_payload()))],
+    )
+
+    with caplog.at_level(logging.WARNING, logger="app.ai.openai_compatible"):
+        result = asyncio.run(
+            provider_with(completions).generate_plan(goal_input())
+        )
+
+    assert isinstance(result, GeneratedPlan)
+    assert len(completions.parse_calls) == 1
+    assert len(completions.create_calls) == 1
+    assert completions.create_calls[0]["response_format"] == {
+        "type": "json_object"
+    }
+    fallback_record = next(
+        record
+        for record in caplog.records
+        if "structured output mode failed" in record.getMessage()
+    )
+    assert fallback_record.exception_type == "TypeError"
+    assert fallback_record.response_mode == "structured_output"
+    assert fallback_record.next_response_mode == "json_object"
+    assert "NoneType" not in caplog.text
+
+
+def test_structured_parser_error_can_continue_through_plain_json() -> None:
+    completions = StubCompletions(
+        parse_results=[TypeError("'NoneType' object is not iterable")],
+        create_results=[
+            api_error(BadRequestError, 400),
+            completion(content=json.dumps(valid_plan_payload())),
+        ],
+    )
+
+    result = asyncio.run(provider_with(completions).generate_plan(goal_input()))
+
+    assert isinstance(result, GeneratedPlan)
+    assert len(completions.parse_calls) == 1
+    assert len(completions.create_calls) == 2
+    assert "response_format" not in completions.create_calls[1]
+
+
+def test_structured_parser_error_never_escapes_when_all_modes_fail() -> None:
+    completions = StubCompletions(
+        parse_results=[TypeError("'NoneType' object is not iterable")],
+        create_results=[
+            api_error(BadRequestError, 400),
+            completion(content="not-json"),
+        ],
+    )
+
+    with pytest.raises(InvalidPlanningJSONError) as exc_info:
+        asyncio.run(provider_with(completions).generate_plan(goal_input()))
+
+    assert not isinstance(exc_info.value, TypeError)
+    assert len(completions.parse_calls) == 1
+    assert len(completions.create_calls) == 2
 
 
 def test_provider_falls_back_to_plain_json_with_three_total_requests() -> None:

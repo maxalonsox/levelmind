@@ -15,6 +15,7 @@ from app.ai.evaluation.contracts import (
 from app.ai.evaluation.errors import (
     EvaluationProviderAPIError,
     EvaluationProviderTimeoutError,
+    InvalidEvaluationJSONError,
     InvalidEvaluationResultError,
 )
 from app.api.evaluation_preview import get_evaluation_provider_factory
@@ -236,6 +237,11 @@ def test_evaluation_preview_enforces_ownership_before_provider(
         ),
         (
             InvalidEvaluationResultError("invalid content"),
+            502,
+            "Evaluation provider returned an invalid response",
+        ),
+        (
+            InvalidEvaluationJSONError("invalid JSON"),
             502,
             "Evaluation provider returned an invalid response",
         ),
