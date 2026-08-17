@@ -1,7 +1,11 @@
 # Backend de LevelMind
 
-Bootstrap mínimo de la API de LevelMind con FastAPI, Pydantic, SQLAlchemy 2 y
-Alembic. En esta etapa no contiene lógica de negocio ni modelos de dominio.
+API de LevelMind con FastAPI, Pydantic, SQLAlchemy 2 y Alembic. Actualmente
+permite persistir Goals y su jerarquía básica de planificación:
+
+```text
+Goal → Stage → Mission → Task
+```
 
 ## Preparación local
 
@@ -65,6 +69,18 @@ La API expone dos verificaciones públicas:
 `Authorization: Bearer <token>`. El propietario del Goal se obtiene del claim
 `sub` verificado; `user_id` no forma parte del body.
 
+La estructura de planificación expone estos endpoints, también autenticados:
+
+- `POST /goals/{goal_id}/stages`
+- `GET /goals/{goal_id}/stages`
+- `POST /stages/{stage_id}/missions`
+- `GET /stages/{stage_id}/missions`
+- `POST /missions/{mission_id}/tasks`
+- `GET /missions/{mission_id}/tasks`
+
+Las consultas devuelven únicamente recursos del usuario autenticado y ordenan
+los resultados por `order_index` ascendente.
+
 Probarlas manualmente con:
 
 ```bash
@@ -79,8 +95,8 @@ pytest
 ```
 
 Los tests no requieren una base de datos activa ni un proyecto Supabase real.
-La persistencia de Goals usa SQLite en memoria, la identidad autenticada se
-reemplaza mediante dependency overrides y el chequeo de `/ready` se aísla.
+La persistencia usa SQLite en memoria, la identidad autenticada se reemplaza
+mediante dependency overrides y el chequeo de `/ready` se aísla.
 
 ## Alembic
 
@@ -94,4 +110,5 @@ alembic upgrade head
 ```
 
 Los comandos que consultan o modifican el esquema requieren una instancia
-PostgreSQL accesible. En esta etapa no existen migraciones de dominio.
+PostgreSQL accesible. Las migraciones crean el Goal y su jerarquía de
+planificación con foreign keys, índices y restricciones de dominio.
