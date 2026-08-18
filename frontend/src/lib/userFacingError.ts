@@ -20,3 +20,27 @@ export function getPlanningError(error: unknown): string {
 
   return 'No pudimos preparar el plan. Podés intentarlo nuevamente.'
 }
+
+export function isPlanAlreadyAcceptedError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 409
+}
+
+export function getPlanAcceptanceError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 401) return 'Tu sesión venció. Volvé a iniciar sesión.'
+    if (error.status === 404) return 'No encontramos el objetivo que querés confirmar.'
+    if (error.status === 422) return 'La propuesta ya no tiene un formato válido.'
+    if (error.status === 500) return 'No pudimos guardar el plan. Ningún cambio parcial fue aplicado.'
+  }
+
+  return 'No pudimos aceptar el plan. Intentá nuevamente.'
+}
+
+export function getActivePlanError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 401) return 'Tu sesión venció. Volvé a iniciar sesión.'
+    if (error.status === 404) return 'No encontramos este plan.'
+  }
+
+  return 'No pudimos cargar el plan activo. Intentá nuevamente.'
+}

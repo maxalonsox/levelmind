@@ -703,6 +703,12 @@ p {
   width: 100%;
 }
 
+.request-state-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
 .planner-orbit {
   position: relative;
   display: grid;
@@ -957,6 +963,128 @@ p {
   font-size: 0.68rem;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.acceptance-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1.5rem;
+  margin-top: 1.25rem;
+  padding: clamp(1.5rem, 4vw, 2.25rem);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(110deg, rgba(77, 227, 212, 0.07), rgba(140, 124, 246, 0.05)),
+    var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.acceptance-card h2 {
+  margin-bottom: 0.55rem;
+  font-size: 1.4rem;
+  letter-spacing: -0.035em;
+}
+
+.acceptance-card p:not(.eyebrow) {
+  max-width: 680px;
+  margin-bottom: 0;
+  color: var(--color-text-muted);
+  line-height: 1.6;
+}
+
+.acceptance-card .alert {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+
+.acceptance-card__action {
+  min-width: 175px;
+}
+
+.active-plan-banner {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  margin-bottom: 1rem;
+  padding: 1.5rem;
+  border: 1px solid rgba(93, 222, 154, 0.24);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(110deg, rgba(93, 222, 154, 0.08), transparent 55%),
+    var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.active-plan-banner__check {
+  display: grid;
+  flex: 0 0 auto;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border: 1px solid rgba(93, 222, 154, 0.36);
+  border-radius: 18px;
+  color: #071a12;
+  background: var(--color-success);
+  font-size: 1.25rem;
+  font-weight: 900;
+  box-shadow: 0 0 25px rgba(93, 222, 154, 0.13);
+}
+
+.active-badge {
+  display: inline-flex;
+  margin-bottom: 0.5rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid rgba(93, 222, 154, 0.24);
+  border-radius: 999px;
+  color: var(--color-success);
+  background: rgba(93, 222, 154, 0.07);
+  font-size: 0.67rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.active-plan-banner h2 {
+  margin-bottom: 0.35rem;
+  font-size: 1.25rem;
+}
+
+.active-plan-banner p {
+  margin-bottom: 0;
+  color: var(--color-text-muted);
+  font-size: 0.86rem;
+}
+
+.progress-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  overflow: hidden;
+  margin-bottom: 3rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-border);
+}
+
+.progress-summary > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.2rem;
+  background: var(--color-surface);
+}
+
+.progress-summary span {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.progress-summary strong {
+  color: var(--color-cyan);
+  font-size: 1.1rem;
 }
 
 .login-layout {
@@ -1282,9 +1410,19 @@ p {
 
   .goal-form-card__actions,
   .planner-state,
-  .mission-card__heading {
+  .mission-card__heading,
+  .active-plan-banner {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .acceptance-card,
+  .progress-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .acceptance-card__action {
+    width: 100%;
   }
 
   .goal-form-card__actions .button {

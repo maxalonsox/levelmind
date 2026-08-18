@@ -1,4 +1,5 @@
 export type Difficulty = 'easy' | 'normal' | 'difficult'
+export type PlanningStatus = 'pending' | 'in_progress' | 'completed' | 'skipped'
 
 export interface PlanTask {
   title: string
@@ -25,4 +26,53 @@ export interface PlanStage {
 
 export interface PlanPreview {
   stages: PlanStage[]
+}
+
+export interface PersistedTask extends PlanTask {
+  id: string
+  mission_id: string
+  estimated_difficulty: Difficulty | null
+  status: PlanningStatus
+  difficulty_feedback: Difficulty | null
+  feedback_text: string | null
+  resolved_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PersistedMission extends Omit<PlanMission, 'tasks'> {
+  id: string
+  stage_id: string
+  status: PlanningStatus
+  created_at: string
+  updated_at: string
+  tasks: PersistedTask[]
+}
+
+export interface PersistedStage extends Omit<PlanStage, 'missions'> {
+  id: string
+  goal_id: string
+  status: PlanningStatus
+  created_at: string
+  updated_at: string
+  missions: PersistedMission[]
+}
+
+export interface PersistedPlan {
+  stages: PersistedStage[]
+}
+
+export interface PlanProgress {
+  percentage: number
+  xp_earned: number
+  completed_tasks: number
+  skipped_tasks: number
+  pending_tasks: number
+  total_tasks: number
+}
+
+export interface GoalPlan extends PersistedPlan {
+  goal_id: string
+  status: string
+  progress: PlanProgress
 }

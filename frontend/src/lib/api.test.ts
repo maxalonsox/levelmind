@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { acceptGoalPlan } from '../api/goals'
+import type { PlanPreview } from '../types/planning'
 import { apiRequest } from './api'
 import { supabase } from './supabase'
 
@@ -58,5 +60,44 @@ describe('apiRequest', () => {
     expect(request?.body).toBe(JSON.stringify(payload))
     expect(headers.get('Authorization')).toBe('Bearer supabase-access-token')
     expect(headers.get('Content-Type')).toBe('application/json')
+  })
+
+  it('posts the reviewed GeneratedPlan to the existing acceptance endpoint', async () => {
+    const reviewedPreview: PlanPreview = {
+      stages: [
+        {
+          title: 'Foundation',
+          description: null,
+          order_index: 0,
+          missions: [
+            {
+              title: 'First mission',
+              description: null,
+              order_index: 0,
+              estimated_difficulty: 'normal',
+              tasks: [
+                {
+                  title: 'First task',
+                  description: null,
+                  order_index: 0,
+                  estimated_duration_minutes: 30,
+                  xp_reward: 10,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }
+
+    await acceptGoalPlan('goal-id', reviewedPreview)
+
+    const [url, request] = vi.mocked(fetch).mock.calls[0]!
+    expect(url).toBe('http://api.test/goals/goal-id/plan/accept')
+    expect(request?.method).toBe('POST')
+    expect(request?.body).toBe(JSON.stringify(reviewedPreview))
+    expect(new Headers(request?.headers).get('Authorization')).toBe(
+      'Bearer supabase-access-token',
+    )
   })
 })

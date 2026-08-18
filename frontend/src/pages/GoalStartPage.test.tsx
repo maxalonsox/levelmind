@@ -10,7 +10,9 @@ import { GoalStartPage } from './GoalStartPage'
 import { PlanPreviewPage } from './PlanPreviewPage'
 
 const apiMocks = vi.hoisted(() => ({
+  acceptGoalPlan: vi.fn(),
   createGoal: vi.fn(),
+  getGoalPlan: vi.fn(),
   previewGoalPlan: vi.fn(),
 }))
 
@@ -99,7 +101,9 @@ async function fillRequiredFields() {
 
 describe('GoalStartPage', () => {
   beforeEach(() => {
+    apiMocks.acceptGoalPlan.mockReset()
     apiMocks.createGoal.mockReset()
+    apiMocks.getGoalPlan.mockReset()
     apiMocks.previewGoalPlan.mockReset()
   })
 
@@ -193,6 +197,6 @@ describe('GoalStartPage', () => {
     )
 
     expect(screen.getByText('Este preview ya no está disponible.')).toBeInTheDocument()
-    expect(screen.getByText(/el preview vive sólo durante este flujo/i)).toBeInTheDocument()
+    expect(screen.getByText(/el preview sin aceptar vive sólo durante esta navegación/i)).toBeInTheDocument()
   })
 })
