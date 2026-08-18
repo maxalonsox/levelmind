@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.13,<2.0",
     "fastapi>=0.115,<0.116",
+    "langgraph>=1.2,<2.0",
     "openai>=2.0,<3.0",
     "psycopg[binary]>=3.2,<4.0",
     "pydantic-settings>=2.6,<3.0",
