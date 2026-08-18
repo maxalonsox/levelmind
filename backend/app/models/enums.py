@@ -23,3 +23,8 @@ class AdaptationStatus(StrEnum):
     PENDING = "pending"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
+
+
+class MemoryType(StrEnum):
+    DECLARED = "declared"
+    OBSERVED = "observed"

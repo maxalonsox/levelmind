@@ -6,6 +6,7 @@ from app.api.evaluation_preview import router as evaluation_preview_router
 from app.api.goals import router as goals_router
 from app.api.goal_plan import router as goal_plan_router
 from app.api.health import router as health_router
+from app.api.memory_entries import router as memory_entries_router
 from app.api.missions import router as missions_router
 from app.api.plan_accept import router as plan_accept_router
 from app.api.plan_preview import router as plan_preview_router
@@ -21,6 +22,7 @@ app = FastAPI(title=settings.app_name)
 
 app.include_router(health_router)
 app.include_router(readiness_router)
+app.include_router(memory_entries_router)
 app.include_router(goals_router)
 app.include_router(stages_router)
 app.include_router(missions_router)
