@@ -48,10 +48,11 @@ El frontend es responsable de:
 
 - interacción con el usuario;
 - onboarding;
-- dashboard y visualización de progreso;
+- Home, plan activo y visualización de progreso;
 - edición permitida del plan y sus tareas;
 - captura de ejecución y feedback;
-- interfaces HITL para revisar, aceptar, modificar o rechazar propuestas.
+- interfaces HITL para revisar, aceptar o rechazar propuestas. La modificación
+  inline de propuestas queda como evolución futura.
 
 No contiene la autoridad final sobre reglas, permisos, progreso ni transiciones de estado.
 
@@ -77,7 +78,7 @@ PostgreSQL es el *source of truth*. Conserva el estado autoritativo del producto
 LangGraph coordina workflows cognitivos, incluyendo:
 
 - secuencia y branching entre nodos especializados;
-- Goal Analyzer, Planner, Evaluator y Adaptation Planner;
+- Planner, Evaluator y Adaptation Planner;
 - pausas HITL y checkpoints cuando resulten útiles;
 - reanudación y control de ejecuciones largas.
 
@@ -105,9 +106,7 @@ Persistencia, autorización, progreso, XP, validaciones, invariantes, transicion
 ```text
 Onboarding
     ↓
-Goal Analyzer
-    ↓
-Structured Goal
+Goal persistido
     ↓
 Planner
     ↓
@@ -115,12 +114,17 @@ Proposed Plan
     ↓
 Validación Pydantic y de dominio
     ↓
-Persistencia transaccional
+Preview
     ↓
 Usuario revisa y confirma
+    ↓
+Persistencia transaccional
 ```
 
-El Goal Analyzer convierte la información mínima de onboarding en una representación estructurada del Goal sin cambiar la intención del usuario. El Planner utiliza ese Goal para proponer el Plan. Los resultados deben validarse antes de persistirlos y el usuario conserva el control sobre la confirmación del plan.
+El backend persiste el Goal con la información mínima del onboarding. El
+Planner utiliza ese Goal para proponer el Plan. El resultado se valida antes de
+mostrar el preview y sólo se persiste como jerarquía cuando el usuario lo
+confirma.
 
 ### 4.2. Ciclo adaptativo
 
@@ -143,7 +147,7 @@ Evaluator
           ↓
          HITL
           ↓
-    accept / modify / reject
+    accept / reject
           ↓
     validación de dominio
           ↓
@@ -154,7 +158,11 @@ Evaluator
     continuar ciclo
 ```
 
-Aceptar o modificar una propuesta no evita la validación de dominio. Al aplicar una adaptación se debe comprobar que su revisión base sigue vigente, preservar el histórico y respetar las invariantes. Rechazarla también debe quedar representado como una decisión trazable cuando corresponda.
+Aceptar una propuesta no evita la validación de dominio. Al aplicar una
+adaptación se comprueba que su revisión base siga vigente, se preserva el
+histórico y se respetan las invariantes. Rechazarla también queda representado
+como una decisión trazable. La edición inline del proposal no forma parte del
+estado actual del MVP.
 
 ## 5. Estado y contexto de los modelos
 
@@ -221,13 +229,18 @@ Después, el LLM interpreta esas señales junto con el contexto mínimo relevant
 
 Los workflows y el dominio deben depender de una interfaz propia para invocar capacidades de IA, no de APIs específicas de un proveedor. Esa abstracción normaliza solicitudes, structured outputs, errores y metadatos de ejecución.
 
-Así se puede cambiar de proveedor o modelo sin modificar reglas de dominio, persistencia ni contratos de aplicación. En esta etapa no se fija un modelo concreto.
+Así se puede cambiar de proveedor o modelo sin modificar reglas de dominio,
+persistencia ni contratos de aplicación. El MVP utiliza OpenRouter mediante su
+API OpenAI-compatible; provider, endpoint y modelo se seleccionan por
+configuración.
 
 ## 11. Procesamiento asíncrono
 
-Las evaluaciones o adaptaciones largas no deben bloquear innecesariamente las requests del usuario. Para el MVP es suficiente comenzar con jobs persistidos en PostgreSQL, con estados, reintentos controlados e idempotencia definidos en código.
-
-No se introducen Redis ni Celery de forma anticipada. Sólo deberían evaluarse si la carga y los requisitos operativos reales muestran que los jobs persistidos ya no son suficientes.
+Las evaluaciones y adaptaciones actuales se ejecutan dentro del request HTTP,
+con timeouts y reintentos acotados para errores transitorios del provider. Los
+jobs persistidos o workers quedan fuera del MVP y sólo deberían evaluarse si la
+carga y los requisitos operativos lo justifican. No se introducen Redis ni
+Celery de forma anticipada.
 
 ## 12. Observabilidad de IA
 
@@ -245,24 +258,10 @@ Las ejecuciones de IA deben ser trazables. `ai_runs` puede registrar, cuando res
 
 La observabilidad debe permitir diagnosticar una propuesta y relacionarla con su workflow y revisión del plan, sin persistir prompts, contexto ni información sensible innecesariamente. Los logs y registros deben aplicar minimización de datos.
 
-## 13. Primera estrategia de implementación
+## 13. Estrategia de implementación
 
-LevelMind se construirá mediante vertical slices pequeños: cada slice debe atravesar las capas necesarias, entregar un comportamiento verificable y evitar implementar anticipadamente todo el modelo conceptual.
-
-El primer slice previsto es:
-
-```text
-usuario autenticado
-    ↓
-crear Goal
-    ↓
-guardar onboarding
-    ↓
-Goal Analyzer
-    ↓
-validar structured output
-    ↓
-persistir structured goal
-```
-
-Este slice define la primera dirección de implementación, pero todavía no se implementa en esta iteración.
+LevelMind se construyó mediante vertical slices pequeños que atraviesan las
+capas necesarias y entregan comportamiento verificable. El MVP actual cubre el
+flujo autenticado desde la creación del Goal y el plan hasta la ejecución,
+evaluación, adaptación HITL y persistencia de revisiones, sin implementar de
+forma anticipada todas las entidades conceptuales.
