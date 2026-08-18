@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.adaptation_accept import router as adaptation_accept_router
 from app.api.adaptation_preview import router as adaptation_preview_router
@@ -19,6 +20,14 @@ from app.core.config import get_settings
 settings = get_settings()
 
 app = FastAPI(title=settings.app_name)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 app.include_router(health_router)
 app.include_router(readiness_router)

@@ -4,6 +4,7 @@ import { ProtectedRoute } from '../auth/ProtectedRoute'
 import { GoalStartPage } from '../pages/GoalStartPage'
 import { HomePage } from '../pages/HomePage'
 import { LoginPage } from '../pages/LoginPage'
+import { PlanPreviewPage } from '../pages/PlanPreviewPage'
 
 export function App() {
   return (
@@ -12,6 +13,7 @@ export function App() {
       <Route element={<ProtectedRoute />}>
         <Route index element={<HomePage />} />
         <Route path="/goals/new" element={<GoalStartPage />} />
+        <Route path="/goals/:goalId/plan" element={<PlanPreviewPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

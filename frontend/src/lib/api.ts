@@ -3,7 +3,7 @@ import { supabase } from './supabase'
 
 interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
   authenticated?: boolean
-  body?: BodyInit | Record<string, unknown> | null
+  body?: object | null
 }
 
 export class ApiError extends Error {
@@ -34,8 +34,8 @@ export async function apiRequest<T>(
     headers.set('Authorization', `Bearer ${accessToken}`)
   }
 
-  let requestBody = body as BodyInit | null | undefined
-  if (body && !(body instanceof FormData) && !(body instanceof URLSearchParams)) {
+  let requestBody: BodyInit | null | undefined
+  if (body !== undefined && body !== null) {
     headers.set('Content-Type', 'application/json')
     requestBody = JSON.stringify(body)
   }
