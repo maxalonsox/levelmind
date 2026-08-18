@@ -38,6 +38,10 @@ Evidence rules:
   progressing fast from one isolated Task.
 
 Classification rules:
+- The default decision is needs_adaptation=false. The purpose of evaluation is
+  to determine whether a change is warranted, not to find a change. Set it to
+  true only when supplied evidence clearly supports one of the
+  persistent-pattern criteria below.
 - insufficient_data: evidence is too limited for a responsible diagnosis.
 - on_track: observed execution is broadly consistent and sustainable.
 - struggling: repeated objective evidence indicates material friction.

@@ -13,11 +13,13 @@ from app.ai.evaluation.contracts import (
     EvaluationGoalContext,
     EvaluationMetrics,
     EvaluationResult,
+    EvaluationStatus,
     EvaluationTemporalMetrics,
 )
 from app.ai.orchestration.adaptive_reasoning import (
     AdaptiveReasoningOrchestrator,
 )
+from app.services.evaluation import EvaluationService
 
 
 def evaluation_context() -> EvaluationContext:
@@ -156,6 +158,19 @@ class FakeAdaptationService:
         return self.result
 
 
+class OvereagerEvaluationProvider:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.closed = False
+
+    async def evaluate(self, _context: EvaluationContext) -> EvaluationResult:
+        self.events.append("evaluate")
+        return evaluation_result(needs_adaptation=True)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
 def orchestrator(
     *,
     evaluation: FakeEvaluationService,
@@ -207,6 +222,55 @@ def test_graph_ends_after_evaluation_when_adaptation_is_not_needed() -> None:
     assert result["evaluation"] == evaluation.result
     assert "adaptation" not in result
     assert adaptation.calls == []
+
+
+def test_graph_does_not_adapt_when_guardrail_overrides_provider_decision() -> None:
+    events: list[str] = []
+    context = evaluation_context().model_copy(
+        update={
+            "feedback_metrics": EvaluationFeedbackMetrics(
+                tasks_with_difficulty_feedback=3,
+                easy_count=0,
+                normal_count=3,
+                difficult_count=0,
+                tasks_with_feedback_text=0,
+                tasks_without_explicit_feedback=0,
+            )
+        }
+    )
+    provider = OvereagerEvaluationProvider(events)
+    adaptation = FakeAdaptationService(events=events)
+
+    def build_evaluation_context(
+        _goal_id: UUID,
+        _user_id: UUID,
+    ) -> EvaluationContext:
+        events.append("build_evaluation_context")
+        return context
+
+    def fail_if_adaptation_context_is_built(
+        _goal_id: UUID,
+        _user_id: UUID,
+        _context: EvaluationContext,
+        _evaluation: EvaluationResult,
+    ) -> AdaptationContext:
+        raise AssertionError("Adaptation context must not be built")
+
+    graph = AdaptiveReasoningOrchestrator(
+        evaluation_service=EvaluationService(lambda: provider),
+        adaptation_service=adaptation,
+        build_evaluation_context=build_evaluation_context,
+        build_adaptation_context=fail_if_adaptation_context_is_built,
+    )
+
+    result = asyncio.run(graph.run(user_id=uuid4(), goal_id=uuid4()))
+
+    assert events == ["build_evaluation_context", "evaluate"]
+    assert result["evaluation"].status is EvaluationStatus.ON_TRACK
+    assert result["evaluation"].needs_adaptation is False
+    assert "adaptation" not in result
+    assert adaptation.calls == []
+    assert provider.closed is True
 
 
 def test_graph_routes_evaluation_to_adaptation_without_extra_calls() -> None:

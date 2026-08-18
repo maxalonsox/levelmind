@@ -27,7 +27,9 @@ export function getGoalPlan(goalId: string): Promise<GoalPlan> {
 }
 
 export function getActiveGoal(): Promise<Goal> {
-  return apiRequest<Goal>('/goals/active')
+  return apiRequest<Goal>('/goals/active', {
+    cache: 'no-store',
+  })
 }
 
 export function deleteGoal(goalId: string): Promise<void> {

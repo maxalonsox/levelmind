@@ -8,6 +8,7 @@ from app.ai.evaluation.contracts import (
     EvaluationContext,
     EvaluationLLMProvider,
     EvaluationResult,
+    EvaluationStatus,
 )
 from app.ai.evaluation.errors import InvalidEvaluationResultError
 from app.services.evaluation_context import (
@@ -57,8 +58,76 @@ class EvaluationService:
                 "Evaluation response does not match EvaluationResult"
             ) from exc
 
+        result = _apply_evidence_guardrails(context, result)
+
         logger.info(
             "Goal evaluation completed",
             extra={"llm_invoked": True},
         )
         return result
+
+
+def _apply_evidence_guardrails(
+    context: EvaluationContext,
+    result: EvaluationResult,
+) -> EvaluationResult:
+    if _is_normal_execution(context) and (
+        result.status is not EvaluationStatus.ON_TRACK
+        or result.needs_adaptation
+    ):
+        return EvaluationResult(
+            status=EvaluationStatus.ON_TRACK,
+            summary=(
+                "La ejecución registrada es consistente y no muestra señales "
+                "persistentes que justifiquen cambiar el plan."
+            ),
+            signals=[],
+            needs_adaptation=False,
+        )
+
+    if result.status in {
+        EvaluationStatus.INSUFFICIENT_DATA,
+        EvaluationStatus.ON_TRACK,
+    }:
+        return result.model_copy(update={"needs_adaptation": False})
+
+    if (
+        result.needs_adaptation
+        and not _has_persistent_adaptation_evidence(context)
+    ):
+        return result.model_copy(update={"needs_adaptation": False})
+
+    return result
+
+
+def _is_normal_execution(context: EvaluationContext) -> bool:
+    metrics = context.metrics
+    feedback = context.feedback_metrics
+    enough_feedback = feedback.tasks_with_difficulty_feedback >= max(
+        2, round(metrics.resolved_tasks * 0.5)
+    )
+    return (
+        metrics.resolved_tasks >= 3
+        and metrics.completed_tasks == metrics.resolved_tasks
+        and metrics.skipped_tasks == 0
+        and feedback.difficult_count == 0
+        and feedback.easy_count < 3
+        and enough_feedback
+    )
+
+
+def _has_persistent_adaptation_evidence(
+    context: EvaluationContext,
+) -> bool:
+    if context.metrics.resolved_tasks < 3:
+        return False
+
+    skipped = context.metrics.skipped_tasks
+    difficult = context.feedback_metrics.difficult_count
+    easy = context.feedback_metrics.easy_count
+    return (
+        skipped >= 2
+        or difficult >= 2
+        or easy >= 3
+        or (skipped >= 1 and difficult >= 1)
+    )

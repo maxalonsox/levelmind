@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { acceptGoalPlan } from '../api/goals'
+import { acceptGoalPlan, getActiveGoal } from '../api/goals'
 import { acceptAdaptation, previewGoalAdaptation, rejectAdaptation } from '../api/adaptations'
 import { resolveTask } from '../api/tasks'
 import type { PlanPreview, TaskResultCreate } from '../types/planning'
@@ -98,6 +98,17 @@ describe('apiRequest', () => {
     expect(url).toBe('http://api.test/goals/goal-id/plan/accept')
     expect(request?.method).toBe('POST')
     expect(request?.body).toBe(JSON.stringify(reviewedPreview))
+    expect(new Headers(request?.headers).get('Authorization')).toBe(
+      'Bearer supabase-access-token',
+    )
+  })
+
+  it('always revalidates the active Goal against the backend', async () => {
+    await getActiveGoal()
+
+    const [url, request] = vi.mocked(fetch).mock.calls[0]!
+    expect(url).toBe('http://api.test/goals/active')
+    expect(request?.cache).toBe('no-store')
     expect(new Headers(request?.headers).get('Authorization')).toBe(
       'Bearer supabase-access-token',
     )

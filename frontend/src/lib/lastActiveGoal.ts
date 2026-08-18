@@ -22,20 +22,20 @@ export function setLastActiveGoalId(goalId: string, userId: string): void {
   validatedActiveGoal = { goalId, userId }
   try {
     window.localStorage.setItem(STORAGE_KEY, goalId)
-    window.dispatchEvent(new Event(CHANGE_EVENT))
   } catch {
     // Navigation persistence is optional; the backend remains the source of truth.
   }
+  window.dispatchEvent(new Event(CHANGE_EVENT))
 }
 
 export function clearLastActiveGoalId(): void {
   validatedActiveGoal = null
   try {
     window.localStorage.removeItem(STORAGE_KEY)
-    window.dispatchEvent(new Event(CHANGE_EVENT))
   } catch {
     // A storage failure must not block sign-out or plan error handling.
   }
+  window.dispatchEvent(new Event(CHANGE_EVENT))
 }
 
 export function useValidatedActiveGoalId(userId: string | undefined): string | null {

@@ -172,16 +172,18 @@ describe('backend-driven active goal recovery', () => {
     expect(getLastActiveGoalId()).toBe(goalA.id)
   })
 
-  it('clears a stale reference when the backend has no active Goal', async () => {
+  it('treats a 404 after reload as a valid empty state and clears stale navigation', async () => {
     window.localStorage.setItem('levelmind:lastActiveGoalId', goalA.id)
     apiMocks.getActiveGoal.mockRejectedValue(new ApiError('Active goal not found', 404))
 
     renderAuthenticated(<MemoryRouter><HomePage /></MemoryRouter>)
 
     expect(await screen.findByRole('link', { name: /Crear objetivo/ })).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /Continuar con mi plan/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Mi plan' })).not.toBeInTheDocument()
     expect(getLastActiveGoalId()).toBeNull()
+    expect(apiMocks.getActiveGoal).toHaveBeenCalledOnce()
   })
 
   it('does not recreate plan navigation after logout and login without an active Goal', async () => {
@@ -275,10 +277,13 @@ describe('active plan deletion', () => {
 
   it('blocks duplicate submits, deletes the Goal, clears the reference and returns Home', async () => {
     let resolveDelete: (() => void) | undefined
+    let rejectRecovery: ((cause: unknown) => void) | undefined
     apiMocks.deleteGoal.mockImplementation(
       () => new Promise<void>((resolve) => { resolveDelete = resolve }),
     )
-    apiMocks.getActiveGoal.mockRejectedValue(new ApiError('Active goal not found', 404))
+    apiMocks.getActiveGoal.mockImplementation(
+      () => new Promise((_resolve, reject) => { rejectRecovery = reject }),
+    )
     const user = userEvent.setup()
     renderActivePlan()
     await waitFor(() => expect(getLastActiveGoalId()).toBe(goalA.id))
@@ -294,6 +299,12 @@ describe('active plan deletion', () => {
     expect(within(dialog).getByRole('button', { name: 'Eliminando plan…' })).toBeDisabled()
 
     resolveDelete?.()
+    await waitFor(() => expect(apiMocks.getActiveGoal).toHaveBeenCalledOnce())
+    expect(getLastActiveGoalId()).toBeNull()
+    expect(screen.queryByRole('link', { name: /Continuar con mi plan/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Mi plan' })).not.toBeInTheDocument()
+
+    rejectRecovery?.(new ApiError('Active goal not found', 404))
     expect(await screen.findByRole('link', { name: /Crear objetivo/ })).toBeInTheDocument()
     expect(getLastActiveGoalId()).toBeNull()
     expect(screen.queryByRole('link', { name: /Continuar con mi plan/ })).not.toBeInTheDocument()

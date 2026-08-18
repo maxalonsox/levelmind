@@ -25,6 +25,8 @@ def evaluation_context(
     total_tasks: int = 10,
     completed_tasks: int = 3,
     skipped_tasks: int = 0,
+    easy_count: int = 0,
+    difficult_count: int = 0,
 ) -> EvaluationContext:
     resolved_tasks = completed_tasks + skipped_tasks
     return EvaluationContext(
@@ -48,9 +50,9 @@ def evaluation_context(
         ),
         feedback_metrics=EvaluationFeedbackMetrics(
             tasks_with_difficulty_feedback=resolved_tasks,
-            easy_count=0,
-            normal_count=resolved_tasks,
-            difficult_count=0,
+            easy_count=easy_count,
+            normal_count=resolved_tasks - easy_count - difficult_count,
+            difficult_count=difficult_count,
             tasks_with_feedback_text=0,
             tasks_without_explicit_feedback=0,
         ),
@@ -74,6 +76,18 @@ def valid_result() -> EvaluationResult:
     )
 
 
+def adaptation_result(
+    *,
+    status: EvaluationStatus = EvaluationStatus.STRUGGLING,
+) -> EvaluationResult:
+    return EvaluationResult(
+        status=status,
+        summary="The provider recommends changing the plan.",
+        signals=[],
+        needs_adaptation=True,
+    )
+
+
 class FakeProvider:
     def __init__(self, result: Any) -> None:
         self.result = result
@@ -91,6 +105,7 @@ class FakeProvider:
 @pytest.mark.parametrize(
     "context",
     [
+        evaluation_context(total_tasks=4, completed_tasks=0),
         evaluation_context(total_tasks=4, completed_tasks=1),
         evaluation_context(total_tasks=20, completed_tasks=2),
     ],
@@ -128,6 +143,88 @@ def test_evaluation_service_invokes_provider_when_evidence_is_sufficient() -> No
     assert provider.closed is True
 
 
+def test_repeated_normal_execution_is_on_track_without_adaptation() -> None:
+    context = evaluation_context(completed_tasks=4)
+    provider = FakeProvider(adaptation_result())
+
+    result = asyncio.run(
+        EvaluationService(lambda: provider).evaluate(context)
+    )
+
+    assert result.status is EvaluationStatus.ON_TRACK
+    assert result.needs_adaptation is False
+    assert result.signals == []
+    assert provider.contexts == [context]
+
+
+def test_one_difficult_task_cannot_trigger_adaptation() -> None:
+    context = evaluation_context(completed_tasks=3, difficult_count=1)
+    provider = FakeProvider(adaptation_result())
+
+    result = asyncio.run(
+        EvaluationService(lambda: provider).evaluate(context)
+    )
+
+    assert result.needs_adaptation is False
+
+
+@pytest.mark.parametrize(
+    ("context", "status"),
+    [
+        (
+            evaluation_context(completed_tasks=1, skipped_tasks=2),
+            EvaluationStatus.STRUGGLING,
+        ),
+        (
+            evaluation_context(completed_tasks=3, difficult_count=2),
+            EvaluationStatus.STRUGGLING,
+        ),
+        (
+            evaluation_context(completed_tasks=3, easy_count=3),
+            EvaluationStatus.PROGRESSING_FAST,
+        ),
+        (
+            evaluation_context(
+                completed_tasks=2,
+                skipped_tasks=1,
+                difficult_count=1,
+            ),
+            EvaluationStatus.MIXED,
+        ),
+    ],
+)
+def test_persistent_patterns_still_allow_adaptation(
+    context: EvaluationContext,
+    status: EvaluationStatus,
+) -> None:
+    provider = FakeProvider(adaptation_result(status=status))
+
+    result = asyncio.run(
+        EvaluationService(lambda: provider).evaluate(context)
+    )
+
+    assert result.needs_adaptation is True
+    assert result.status is status
+
+
+@pytest.mark.parametrize(
+    "status",
+    [EvaluationStatus.INSUFFICIENT_DATA, EvaluationStatus.ON_TRACK],
+)
+def test_semantically_non_adaptive_status_cannot_request_adaptation(
+    status: EvaluationStatus,
+) -> None:
+    context = evaluation_context(completed_tasks=3, difficult_count=2)
+    provider = FakeProvider(adaptation_result(status=status))
+
+    result = asyncio.run(
+        EvaluationService(lambda: provider).evaluate(context)
+    )
+
+    assert result.status is status
+    assert result.needs_adaptation is False
+
+
 def test_evaluation_service_revalidates_provider_result() -> None:
     context = evaluation_context()
     provider = FakeProvider(
@@ -152,6 +249,9 @@ def test_evaluation_prompt_requires_conservative_non_mutating_analysis() -> None
     assert "observed facts from interpretations" in prompt
     assert "not failure" in prompt
     assert "one difficult task is not enough" in prompt
+    assert "the default decision is needs_adaptation=false" in prompt
+    assert "not to find a change" in prompt
+    assert "persistent-pattern criteria" in prompt
     assert "do not diagnose emotions, health, psychology" in prompt
     assert "factual historical evidence" in prompt
     assert "not a declared preference" in prompt
