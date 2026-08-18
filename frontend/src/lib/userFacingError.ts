@@ -25,6 +25,7 @@ export function getRegistrationError(error: unknown): string {
 export function getGoalCreationError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 401) return 'Tu sesión venció. Volvé a iniciar sesión.'
+    if (error.status === 409) return 'Ya tenés un objetivo activo. Continuá con ese objetivo o eliminalo antes de crear otro.'
     if (error.status === 422) return 'Revisá los datos del objetivo e intentá nuevamente.'
   }
 

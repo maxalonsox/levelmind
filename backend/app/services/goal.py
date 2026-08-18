@@ -2,6 +2,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.goal import Goal
@@ -9,7 +10,14 @@ from app.models.memory_entry import MemoryEntry
 from app.schemas.goal import GoalCreate
 
 
+class ActiveGoalAlreadyExistsError(Exception):
+    """Raised when a user tries to create a second active Goal."""
+
+
 def create_goal(db: Session, data: GoalCreate, user_id: UUID) -> Goal:
+    if _has_active_goal(db, user_id):
+        raise ActiveGoalAlreadyExistsError
+
     goal = Goal(
         user_id=user_id,
         title=data.title,
@@ -19,11 +27,28 @@ def create_goal(db: Session, data: GoalCreate, user_id: UUID) -> Goal:
         availability=data.availability,
     )
 
-    db.add(goal)
-    db.commit()
-    db.refresh(goal)
+    try:
+        db.add(goal)
+        db.commit()
+        db.refresh(goal)
+    except IntegrityError:
+        db.rollback()
+        if _has_active_goal(db, user_id):
+            raise ActiveGoalAlreadyExistsError from None
+        raise
 
     return goal
+
+
+def _has_active_goal(db: Session, user_id: UUID) -> bool:
+    return (
+        db.scalar(
+            select(Goal.id)
+            .where(Goal.user_id == user_id, Goal.status == "active")
+            .limit(1)
+        )
+        is not None
+    )
 
 
 def get_owned_goal(

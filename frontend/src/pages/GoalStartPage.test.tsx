@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AuthContext, type AuthContextValue } from '../auth/AuthContext'
+import { ApiError } from '../lib/api'
 import type { Goal } from '../types/goals'
 import type { PlanPreview } from '../types/planning'
 import { GoalStartPage } from './GoalStartPage'
@@ -167,6 +168,23 @@ describe('GoalStartPage', () => {
 
     expect(
       await screen.findByText('No pudimos crear el objetivo. Intentá nuevamente en unos momentos.'),
+    ).toBeInTheDocument()
+    expect(apiMocks.previewGoalPlan).not.toHaveBeenCalled()
+  })
+
+  it('explains that an existing active Goal must be continued or deleted', async () => {
+    apiMocks.createGoal.mockRejectedValue(
+      new ApiError('User already has an active Goal', 409),
+    )
+    renderGoalFlow()
+    const user = await fillRequiredFields()
+
+    await user.click(screen.getByRole('button', { name: /Crear y generar plan/ }))
+
+    expect(
+      await screen.findByText(
+        'Ya tenés un objetivo activo. Continuá con ese objetivo o eliminalo antes de crear otro.',
+      ),
     ).toBeInTheDocument()
     expect(apiMocks.previewGoalPlan).not.toHaveBeenCalled()
   })

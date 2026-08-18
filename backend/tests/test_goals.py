@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import AuthenticatedUser, get_current_user
 from app.main import app
 from app.models.goal import Goal
 
@@ -74,6 +75,40 @@ def test_create_goal_returns_authenticated_user_as_owner(
     assert persisted_goal is not None
     assert str(persisted_goal.id) == body["id"]
     assert persisted_goal.user_id == authenticated_user_id
+
+
+def test_create_goal_rejects_second_active_goal(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    first = asyncio.run(post_goal(valid_goal_payload()))
+
+    second = asyncio.run(post_goal(valid_goal_payload()))
+
+    assert first.status_code == 201
+    assert second.status_code == 409
+    assert second.json() == {"detail": "User already has an active Goal"}
+    assert len(list(db_session.scalars(select(Goal)))) == 1
+
+
+def test_different_user_can_create_their_own_active_goal(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    first = asyncio.run(post_goal(valid_goal_payload()))
+    other_user_id = uuid4()
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        id=other_user_id
+    )
+
+    second = asyncio.run(post_goal(valid_goal_payload()))
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert {goal.user_id for goal in db_session.scalars(select(Goal))} == {
+        authenticated_user_id,
+        other_user_id,
+    }
 
 
 def test_create_goal_rejects_empty_title(

@@ -59,9 +59,12 @@ def test_revision_metadata_has_one_alembic_head() -> None:
     config.set_main_option("path_separator", "os")
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["b8f1c2d3e4a5"]
+    assert script.get_heads() == ["c9d2e4f6a8b0"]
     assert "plan_revisions" in Base.metadata.tables
     assert "estimated_difficulty" in Base.metadata.tables["tasks"].columns
+    assert "uq_goals_user_id_active" in {
+        index.name for index in Base.metadata.tables["goals"].indexes
+    }
     assert (
         "base_revision_id"
         in Base.metadata.tables["plan_adaptations"].columns

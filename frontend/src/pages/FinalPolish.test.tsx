@@ -89,7 +89,8 @@ describe('final MVP navigation and session polish', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('Este objetivo todavía no tiene un plan activo.')).toBeInTheDocument()
+    expect(await screen.findByText('Tu objetivo está guardado.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Generar plan' })).toBeInTheDocument()
     expect(getLastActiveGoalId()).toBe(goalId)
     expect(window.localStorage).toHaveLength(1)
   })

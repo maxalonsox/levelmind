@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import { previewGoalAdaptation } from '../api/adaptations'
-import { deleteGoal, getGoalPlan } from '../api/goals'
+import { deleteGoal, getActiveGoal, getGoalPlan, previewGoalPlan } from '../api/goals'
 import { resolveTask } from '../api/tasks'
 import { useAuth } from '../auth/AuthContext'
 import { ActivePlanHierarchy } from '../components/ActivePlanHierarchy'
@@ -14,6 +14,7 @@ import {
   getActivePlanError,
   getAdaptationPreviewError,
   getGoalDeletionError,
+  getPlanningError,
   getTaskResolutionError,
   isActivePlanNotFoundError,
   isTaskAlreadyResolvedError,
@@ -48,10 +49,13 @@ export function ActivePlanPage() {
   const resolutionInFlight = useRef(false)
   const evaluationInFlight = useRef(false)
   const deletionInFlight = useRef(false)
+  const planningInFlight = useRef(false)
   const deleteConfirmButtonRef = useRef<HTMLButtonElement>(null)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deletionError, setDeletionError] = useState<string | null>(null)
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false)
+  const [planningError, setPlanningError] = useState<string | null>(null)
 
   async function retryPlan() {
     if (!goalId) return
@@ -215,6 +219,97 @@ export function ActivePlanPage() {
     }
   }
 
+  async function handleGeneratePlan() {
+    if (!goalId || planningInFlight.current) return
+    planningInFlight.current = true
+    setIsGeneratingPlan(true)
+    setPlanningError(null)
+
+    try {
+      const activeGoal = goal?.id === goalId ? goal : await getActiveGoal()
+      if (activeGoal.id !== goalId) {
+        throw new Error('Recovered Goal does not match the requested Goal')
+      }
+      const preview = await previewGoalPlan(goalId)
+      navigate(`/goals/${goalId}/plan`, {
+        state: { goal: activeGoal, preview },
+      })
+    } catch (cause) {
+      setPlanningError(getPlanningError(cause))
+    } finally {
+      planningInFlight.current = false
+      setIsGeneratingPlan(false)
+    }
+  }
+
+  function renderDeletionControls(planningIncomplete: boolean) {
+    const resourceName = planningIncomplete ? 'objetivo' : 'plan'
+    const actionLabel = planningIncomplete ? 'Eliminar objetivo' : 'Eliminar plan'
+
+    return (
+      <>
+        <section className="plan-danger-zone">
+          <div>
+            <h2>Administrar {resourceName}</h2>
+            <p>
+              {planningIncomplete
+                ? 'Podés eliminar este objetivo y comenzar nuevamente cuando quieras.'
+                : 'Podés eliminar este objetivo y todo su progreso cuando ya no quieras conservarlo.'}
+            </p>
+          </div>
+          <button
+            className="button button--danger button--small"
+            type="button"
+            onClick={() => {
+              setDeletionError(null)
+              setIsDeleteDialogOpen(true)
+            }}
+          >
+            {actionLabel}
+          </button>
+        </section>
+
+        {isDeleteDialogOpen && (
+          <div className="dialog-backdrop">
+            <section
+              className="confirmation-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-plan-title"
+              aria-describedby="delete-plan-description"
+            >
+              <h2 id="delete-plan-title">¿Eliminar este {resourceName}?</h2>
+              <p id="delete-plan-description">
+                Vas a eliminar este objetivo y dejar de acceder a su progreso. Esta acción no se
+                puede deshacer.
+              </p>
+              {deletionError && <Alert>{deletionError}</Alert>}
+              <div className="confirmation-dialog__actions">
+                <button
+                  className="button button--secondary"
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={() => setIsDeleteDialogOpen(false)}
+                >
+                  Cancelar
+                </button>
+                <button
+                  ref={deleteConfirmButtonRef}
+                  className="button button--danger"
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={() => void handleDeleteGoal()}
+                >
+                  {isDeleting ? `Eliminando ${resourceName}…` : actionLabel}
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
+      </>
+    )
+  }
+
   if (isLoading) {
     return (
       <AppShell eyebrow="Plan activo" title="Cargando tu plan…">
@@ -245,16 +340,29 @@ export function ActivePlanPage() {
 
   if (plan.stages.length === 0) {
     return (
-      <AppShell eyebrow="Plan activo" title="Este objetivo todavía no tiene un plan activo.">
+      <AppShell eyebrow="Planificación pendiente" title="Tu objetivo está guardado.">
         <section className="request-state-card">
+          <h2>{goal?.title ?? 'Todavía falta generar el plan'}</h2>
           <p>
-            No encontramos una jerarquía persistida. Un preview sólo se convierte en plan activo
-            después de que lo aceptás.
+            Este objetivo todavía no tiene etapas, misiones ni tareas. Podés generar una nueva
+            propuesta sin crear otro objetivo.
           </p>
-          <Link className="button button--secondary" to="/">
-            Volver al inicio
-          </Link>
+          {planningError && <Alert>{planningError}</Alert>}
+          <div className="request-state-card__actions">
+            <button
+              className="button button--primary"
+              type="button"
+              disabled={isGeneratingPlan}
+              onClick={() => void handleGeneratePlan()}
+            >
+              {isGeneratingPlan ? 'Generando plan…' : 'Generar plan'}
+            </button>
+            <Link className="button button--secondary" to="/">
+              Volver al inicio
+            </Link>
+          </div>
         </section>
+        {renderDeletionControls(true)}
       </AppShell>
     )
   }
@@ -347,60 +455,7 @@ export function ActivePlanPage() {
         )}
       />
 
-      <section className="plan-danger-zone">
-        <div>
-          <h2>Administrar plan</h2>
-          <p>Podés eliminar este objetivo y todo su progreso cuando ya no quieras conservarlo.</p>
-        </div>
-        <button
-          className="button button--danger button--small"
-          type="button"
-          onClick={() => {
-            setDeletionError(null)
-            setIsDeleteDialogOpen(true)
-          }}
-        >
-          Eliminar plan
-        </button>
-      </section>
-
-      {isDeleteDialogOpen && (
-        <div className="dialog-backdrop">
-          <section
-            className="confirmation-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-plan-title"
-            aria-describedby="delete-plan-description"
-          >
-            <h2 id="delete-plan-title">¿Eliminar este plan?</h2>
-            <p id="delete-plan-description">
-              Vas a eliminar este objetivo y dejar de acceder a su progreso. Esta acción no se
-              puede deshacer.
-            </p>
-            {deletionError && <Alert>{deletionError}</Alert>}
-            <div className="confirmation-dialog__actions">
-              <button
-                className="button button--secondary"
-                type="button"
-                disabled={isDeleting}
-                onClick={() => setIsDeleteDialogOpen(false)}
-              >
-                Cancelar
-              </button>
-              <button
-                ref={deleteConfirmButtonRef}
-                className="button button--danger"
-                type="button"
-                disabled={isDeleting}
-                onClick={() => void handleDeleteGoal()}
-              >
-                {isDeleting ? 'Eliminando plan…' : 'Eliminar plan'}
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
+      {renderDeletionControls(false)}
     </AppShell>
   )
 }

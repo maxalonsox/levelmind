@@ -284,7 +284,7 @@ def test_memory_table_is_registered_at_alembic_head() -> None:
     config.set_main_option("path_separator", "os")
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["b8f1c2d3e4a5"]
+    assert script.get_heads() == ["c9d2e4f6a8b0"]
     table = Base.metadata.tables["memory_entries"]
     assert set(table.columns.keys()) == {
         "id",

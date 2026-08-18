@@ -105,6 +105,53 @@ def test_plan_preview_returns_plan_without_persisting_it(
     assert db_session.scalar(select(func.count()).select_from(Task)) == 0
 
 
+def test_plan_preview_can_retry_for_the_same_unplanned_goal_without_duplication(
+    db_session: Session, authenticated_user_id: UUID
+) -> None:
+    goal = persist_goal(db_session, authenticated_user_id)
+    provider = PreviewProvider()
+    app.dependency_overrides[get_planning_provider] = lambda: provider
+
+    try:
+        first = asyncio.run(post_preview(goal.id))
+        second = asyncio.run(post_preview(goal.id))
+    finally:
+        app.dependency_overrides.pop(get_planning_provider, None)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert len(provider.calls) == 2
+    assert db_session.scalar(select(func.count()).select_from(Goal)) == 1
+    assert db_session.scalar(select(func.count()).select_from(Stage)) == 0
+
+
+def test_plan_preview_rejects_goal_with_persisted_plan_before_provider(
+    db_session: Session, authenticated_user_id: UUID
+) -> None:
+    goal = persist_goal(db_session, authenticated_user_id)
+    db_session.add(Stage(goal_id=goal.id, title="Existing", order_index=0))
+    db_session.commit()
+    provider = PreviewProvider()
+    provider_dependency_calls = 0
+
+    def provide_planning_provider() -> PreviewProvider:
+        nonlocal provider_dependency_calls
+        provider_dependency_calls += 1
+        return provider
+
+    app.dependency_overrides[get_planning_provider] = provide_planning_provider
+    try:
+        response = asyncio.run(post_preview(goal.id))
+    finally:
+        app.dependency_overrides.pop(get_planning_provider, None)
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Goal already has a persisted plan"}
+    assert provider_dependency_calls == 0
+    assert provider.calls == []
+    assert db_session.scalar(select(func.count()).select_from(Stage)) == 1
+
+
 def test_plan_preview_enforces_goal_ownership(
     db_session: Session, authenticated_user_id: UUID
 ) -> None:

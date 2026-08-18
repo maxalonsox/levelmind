@@ -3,6 +3,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.planning.contracts import PlanningLLMProvider
@@ -16,6 +17,7 @@ from app.auth import AuthenticatedUser, get_current_user
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.goal import Goal
+from app.models.stage import Stage
 from app.schemas.generated_plan import GeneratedPlan
 from app.services.goal import get_owned_goal
 from app.services.planning import PlanningService
@@ -42,7 +44,13 @@ def get_preview_goal(
     current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> Goal:
-    return get_owned_goal(db, goal_id, current_user.id)
+    goal = get_owned_goal(db, goal_id, current_user.id)
+    if db.scalar(select(Stage.id).where(Stage.goal_id == goal.id).limit(1)):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Goal already has a persisted plan",
+        )
+    return goal
 
 
 @router.post("/{goal_id}/plan/preview", response_model=GeneratedPlan)

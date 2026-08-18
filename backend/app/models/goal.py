@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, DateTime, String, Text, func
+from sqlalchemy import CheckConstraint, DateTime, Index, String, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -21,6 +21,12 @@ class Goal(Base):
             "status IN ('active', 'completed', 'archived')",
             name="ck_goals_status",
         ),
+        Index(
+            "uq_goals_user_id_active",
+            "user_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ).ddl_if(dialect="postgresql"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

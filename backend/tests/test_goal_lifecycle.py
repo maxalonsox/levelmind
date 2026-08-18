@@ -1,5 +1,5 @@
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -45,30 +45,24 @@ def persist_goal(
     return goal
 
 
-def test_owner_recovers_latest_active_goal_deterministically(
+def test_owner_recovers_their_active_goal(
     db_session: Session,
     authenticated_user_id: UUID,
 ) -> None:
     now = datetime.now(UTC)
-    older = persist_goal(
-        db_session,
-        authenticated_user_id,
-        created_at=now - timedelta(days=1),
-    )
-    latest = persist_goal(
+    active = persist_goal(
         db_session,
         authenticated_user_id,
         created_at=now,
     )
     persist_goal(db_session, authenticated_user_id, status="archived")
-    persist_goal(db_session, uuid4(), created_at=now + timedelta(days=1))
+    persist_goal(db_session, uuid4(), created_at=now)
 
     response = asyncio.run(request("GET", "/goals/active"))
 
     assert response.status_code == 200
-    assert response.json()["id"] == str(latest.id)
+    assert response.json()["id"] == str(active.id)
     assert response.json()["status"] == "active"
-    assert response.json()["id"] != str(older.id)
 
 
 def test_active_goal_returns_404_without_owned_active_goal(

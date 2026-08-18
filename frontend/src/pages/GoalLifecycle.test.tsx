@@ -12,15 +12,17 @@ import {
   getLastActiveGoalId,
 } from '../lib/lastActiveGoal'
 import type { Goal } from '../types/goals'
-import type { GoalPlan } from '../types/planning'
+import type { GoalPlan, PlanPreview } from '../types/planning'
 import { ActivePlanPage } from './ActivePlanPage'
 import { HomePage } from './HomePage'
 import { LoginPage } from './LoginPage'
+import { PlanPreviewPage } from './PlanPreviewPage'
 
 const apiMocks = vi.hoisted(() => ({
   deleteGoal: vi.fn(),
   getActiveGoal: vi.fn(),
   getGoalPlan: vi.fn(),
+  previewGoalPlan: vi.fn(),
 }))
 
 vi.mock(import('../api/goals'), async (importOriginal) => ({
@@ -28,6 +30,7 @@ vi.mock(import('../api/goals'), async (importOriginal) => ({
   deleteGoal: apiMocks.deleteGoal,
   getActiveGoal: apiMocks.getActiveGoal,
   getGoalPlan: apiMocks.getGoalPlan,
+  previewGoalPlan: apiMocks.previewGoalPlan,
 }))
 
 const timestamp = '2026-08-18T10:00:00Z'
@@ -55,6 +58,36 @@ const plan: GoalPlan = {
       created_at: timestamp,
       updated_at: timestamp,
       missions: [],
+    },
+  ],
+}
+const planningPending: GoalPlan = {
+  ...plan,
+  stages: [],
+}
+const preview: PlanPreview = {
+  stages: [
+    {
+      title: 'Primera etapa recuperada',
+      description: 'Una propuesta nueva para el objetivo existente',
+      order_index: 0,
+      missions: [
+        {
+          title: 'Primera misión',
+          description: null,
+          order_index: 0,
+          estimated_difficulty: 'normal',
+          tasks: [
+            {
+              title: 'Primera tarea',
+              description: null,
+              order_index: 0,
+              estimated_duration_minutes: 30,
+              xp_reward: 10,
+            },
+          ],
+        },
+      ],
     },
   ],
 }
@@ -122,12 +155,25 @@ function renderActivePlan() {
   )
 }
 
+function renderPlanningRecovery() {
+  return renderAuthenticated(
+    <MemoryRouter initialEntries={[`/goals/${goalA.id}`]}>
+      <Routes>
+        <Route path="/goals/:goalId" element={<ActivePlanPage />} />
+        <Route path="/goals/:goalId/plan" element={<PlanPreviewPage />} />
+        <Route path="/" element={<HomePage />} />
+      </Routes>
+    </MemoryRouter>,
+  )
+}
+
 describe('backend-driven active goal recovery', () => {
   beforeEach(() => {
     clearLastActiveGoalId()
     apiMocks.deleteGoal.mockReset()
     apiMocks.getActiveGoal.mockReset()
     apiMocks.getGoalPlan.mockReset()
+    apiMocks.previewGoalPlan.mockReset()
   })
 
   it('recovers the active Goal after login and rebuilds Home navigation', async () => {
@@ -258,6 +304,7 @@ describe('active plan deletion', () => {
     apiMocks.deleteGoal.mockReset()
     apiMocks.getActiveGoal.mockReset()
     apiMocks.getGoalPlan.mockReset()
+    apiMocks.previewGoalPlan.mockReset()
   })
 
   it('shows a confirmation and Cancelar does not call the API', async () => {
@@ -326,5 +373,69 @@ describe('active plan deletion', () => {
     expect(screen.getByRole('heading', { name: 'Plan guardado' })).toBeInTheDocument()
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(getLastActiveGoalId()).toBe(goalA.id)
+  })
+})
+
+describe('planning recovery for an active Goal without a plan', () => {
+  beforeEach(() => {
+    clearLastActiveGoalId()
+    apiMocks.deleteGoal.mockReset()
+    apiMocks.getActiveGoal.mockReset()
+    apiMocks.getGoalPlan.mockReset()
+    apiMocks.previewGoalPlan.mockReset()
+    apiMocks.getGoalPlan.mockResolvedValue(planningPending)
+  })
+
+  it('recovers after refresh and generates a preview for the existing Goal', async () => {
+    apiMocks.getActiveGoal.mockResolvedValue(goalA)
+    apiMocks.previewGoalPlan.mockResolvedValue(preview)
+    const user = userEvent.setup()
+    renderPlanningRecovery()
+
+    expect(await screen.findByRole('heading', { name: 'Tu objetivo está guardado.' }))
+      .toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Generar plan' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Eliminar objetivo' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Generar plan' }))
+
+    expect(await screen.findByRole('heading', { name: 'Tu recorrido inicial' }))
+      .toBeInTheDocument()
+    expect(apiMocks.getActiveGoal).toHaveBeenCalledOnce()
+    expect(apiMocks.previewGoalPlan).toHaveBeenCalledOnce()
+    expect(apiMocks.previewGoalPlan).toHaveBeenCalledWith(goalA.id)
+    expect(screen.getByText('Primera etapa recuperada')).toBeInTheDocument()
+  })
+
+  it('keeps the recovery actions available after a sanitized planning error', async () => {
+    apiMocks.getActiveGoal.mockResolvedValue(goalA)
+    apiMocks.previewGoalPlan.mockRejectedValue(new ApiError('private provider detail', 504))
+    const user = userEvent.setup()
+    renderPlanningRecovery()
+
+    await user.click(await screen.findByRole('button', { name: 'Generar plan' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'La planificación demoró demasiado. Podés intentarlo otra vez.',
+    )
+    expect(screen.getByRole('button', { name: 'Generar plan' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Eliminar objetivo' })).toBeEnabled()
+  })
+
+  it('deletes the unplanned Goal and returns Home without stale navigation', async () => {
+    apiMocks.deleteGoal.mockResolvedValue(undefined)
+    apiMocks.getActiveGoal.mockRejectedValue(new ApiError('Active goal not found', 404))
+    const user = userEvent.setup()
+    renderPlanningRecovery()
+
+    await user.click(await screen.findByRole('button', { name: 'Eliminar objetivo' }))
+    const dialog = screen.getByRole('dialog', { name: '¿Eliminar este objetivo?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Eliminar objetivo' }))
+
+    expect(await screen.findByRole('link', { name: /Crear objetivo/ })).toBeInTheDocument()
+    expect(apiMocks.deleteGoal).toHaveBeenCalledWith(goalA.id)
+    expect(screen.queryByRole('link', { name: /Continuar con mi plan/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Mi plan' })).not.toBeInTheDocument()
+    expect(getLastActiveGoalId()).toBeNull()
   })
 })
