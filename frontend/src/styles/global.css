@@ -1154,7 +1154,7 @@ p {
 
 .progress-summary {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 1px;
   overflow: hidden;
   margin-bottom: 3rem;
@@ -1313,8 +1313,16 @@ p {
   background: rgba(140, 124, 246, 0.07) !important;
 }
 
-.task-row__action {
+.task-row__action,
+.task-row__actions {
   white-space: nowrap;
+}
+
+.task-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .task-row__resolution {
@@ -2184,13 +2192,19 @@ p {
   }
 
   .task-row--active .task-row__metadata,
-  .task-row--active .task-row__action {
+  .task-row--active .task-row__action,
+  .task-row--active .task-row__actions {
     grid-column: 2;
   }
 
   .task-row__action,
+  .task-row__actions,
   .task-resolution-panel__actions .button {
     width: 100%;
+  }
+
+  .task-row__actions .button {
+    flex: 1;
   }
 
   .result-options {

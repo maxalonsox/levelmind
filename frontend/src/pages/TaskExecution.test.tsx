@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -11,13 +11,17 @@ import { ActivePlanPage } from './ActivePlanPage'
 const apiMocks = vi.hoisted(() => ({
   getGoalPlan: vi.fn(),
   resolveTask: vi.fn(),
+  updateTask: vi.fn(),
 }))
 
 vi.mock(import('../api/goals'), async (importOriginal) => ({
   ...(await importOriginal()),
   getGoalPlan: apiMocks.getGoalPlan,
 }))
-vi.mock(import('../api/tasks'), () => ({ resolveTask: apiMocks.resolveTask }))
+vi.mock(import('../api/tasks'), () => ({
+  resolveTask: apiMocks.resolveTask,
+  updateTask: apiMocks.updateTask,
+}))
 
 const goalId = 'goal-id'
 const timestamp = '2026-08-18T10:00:00Z'
@@ -69,6 +73,7 @@ function planWith(
     progress: {
       percentage: options.percentage ?? 50,
       xp_earned: options.xpEarned ?? 5,
+      level: (options.xpEarned ?? 5) >= 100 ? 2 : 1,
       completed_tasks: options.percentage === 100 ? 2 : 1,
       skipped_tasks: options.skippedTasks ?? 0,
       pending_tasks: options.pendingTasks ?? 1,
@@ -84,6 +89,7 @@ function planWith(
         status: hierarchyStatus,
         created_at: timestamp,
         updated_at: timestamp,
+        estimated_duration_minutes: 90,
         missions: [
           {
             id: 'mission-id',
@@ -95,6 +101,7 @@ function planWith(
             status: hierarchyStatus,
             created_at: timestamp,
             updated_at: timestamp,
+            estimated_duration_minutes: 90,
             tasks: [task, completedTask],
           },
         ],
@@ -161,6 +168,7 @@ describe('task execution from the active plan', () => {
   beforeEach(() => {
     apiMocks.getGoalPlan.mockReset()
     apiMocks.resolveTask.mockReset()
+    apiMocks.updateTask.mockReset()
   })
 
   it('renders the persisted hierarchy and only offers resolution for pending tasks', async () => {
@@ -170,13 +178,83 @@ describe('task execution from the active plan', () => {
 
     expect(await screen.findByText('Backend sólido')).toBeInTheDocument()
     expect(screen.queryByText('API de tareas')).not.toBeInTheDocument()
-    await expandActiveStage(user)
+    const stageToggle = await expandActiveStage(user)
     expect(screen.getByText('API de tareas')).toBeInTheDocument()
     expect(screen.getByText('Implementar endpoint')).toBeInTheDocument()
     expect(screen.getByText('Diseñar contrato')).toBeInTheDocument()
     expect(screen.getByText('Tu feedback: Difícil')).toBeInTheDocument()
     expect(screen.getByText('“El contrato requirió más casos de borde.”')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Registrar resultado' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Editar' })).toHaveLength(1)
+    expect(within(stageToggle).getByText(/1 h 30 min/)).toBeInTheDocument()
+    expect(screen.getByText('1 h 30 min estimados')).toBeInTheDocument()
+    const progress = screen.getByLabelText('Progreso del plan')
+    const levelLabel = within(progress).getByText('Nivel')
+    expect(levelLabel).toBeInTheDocument()
+    expect(levelLabel.nextElementSibling).toHaveTextContent('1')
+  })
+
+  it('edits a pending task and refreshes its persisted data', async () => {
+    const editedTask = {
+      ...pendingTask,
+      title: 'Endpoint robusto',
+      description: 'Validar todos los casos',
+      estimated_duration_minutes: 60,
+    }
+    apiMocks.getGoalPlan
+      .mockResolvedValueOnce(planWith(pendingTask))
+      .mockResolvedValueOnce(planWith(editedTask))
+    apiMocks.updateTask.mockResolvedValue(editedTask)
+    renderActivePlan()
+    const user = userEvent.setup()
+    await expandActiveStage(user)
+
+    await user.click(screen.getByRole('button', { name: 'Editar' }))
+    const title = screen.getByRole('textbox', { name: 'Título' })
+    await user.clear(title)
+    await user.type(title, 'Endpoint robusto')
+    const description = screen.getByRole('textbox', { name: 'Descripción' })
+    await user.clear(description)
+    await user.type(description, 'Validar todos los casos')
+    const duration = screen.getByRole('spinbutton', { name: 'Duración estimada en minutos' })
+    await user.clear(duration)
+    await user.type(duration, '60')
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(apiMocks.updateTask).toHaveBeenCalledWith('pending-task-id', {
+      title: 'Endpoint robusto',
+      description: 'Validar todos los casos',
+      estimated_duration_minutes: 60,
+    })
+    expect(await screen.findByText('Endpoint robusto')).toBeInTheDocument()
+    expect(apiMocks.getGoalPlan).toHaveBeenCalledTimes(2)
+  })
+
+  it('cancels editing without saving and preserves the editor after an error', async () => {
+    apiMocks.getGoalPlan.mockResolvedValue(planWith(pendingTask))
+    apiMocks.updateTask.mockRejectedValue(new ApiError('private database detail', 500))
+    renderActivePlan()
+    const user = userEvent.setup()
+    await expandActiveStage(user)
+
+    await user.click(screen.getByRole('button', { name: 'Editar' }))
+    await user.clear(screen.getByRole('textbox', { name: 'Título' }))
+    await user.type(screen.getByRole('textbox', { name: 'Título' }), 'Cambio temporal')
+    await user.click(screen.getByRole('button', { name: 'Cancelar' }))
+    expect(apiMocks.updateTask).not.toHaveBeenCalled()
+    expect(screen.getByText('Implementar endpoint')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Editar' }))
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+    expect(
+      await screen.findByText(
+        'No pudimos guardar los cambios. La tarea conserva sus datos anteriores.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Título' })).toHaveValue(
+      'Implementar endpoint',
+    )
+    expect(screen.queryByRole('button', { name: 'Editar' })).not.toBeInTheDocument()
   })
 
   it('submits completed once, keeps backend state while loading, then refreshes progress and XP', async () => {

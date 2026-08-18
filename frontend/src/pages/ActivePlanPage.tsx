@@ -3,25 +3,32 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import { previewGoalAdaptation } from '../api/adaptations'
 import { deleteGoal, getActiveGoal, getGoalPlan, previewGoalPlan } from '../api/goals'
-import { resolveTask } from '../api/tasks'
+import { resolveTask, updateTask } from '../api/tasks'
 import { useAuth } from '../auth/AuthContext'
 import { ActivePlanHierarchy } from '../components/ActivePlanHierarchy'
 import { Alert } from '../components/Alert'
 import { AppShell } from '../components/AppShell'
 import { LoadingState } from '../components/LoadingState'
 import { TaskResolutionPanel } from '../components/TaskResolutionPanel'
+import { TaskEditPanel } from '../components/TaskEditPanel'
 import {
   getActivePlanError,
   getAdaptationPreviewError,
   getGoalDeletionError,
   getPlanningError,
   getTaskResolutionError,
+  getTaskUpdateError,
   isActivePlanNotFoundError,
   isTaskAlreadyResolvedError,
 } from '../lib/userFacingError'
 import { clearLastActiveGoalId, setLastActiveGoalId } from '../lib/lastActiveGoal'
 import type { Goal } from '../types/goals'
-import type { GoalPlan, PersistedTask, TaskResultCreate } from '../types/planning'
+import type {
+  GoalPlan,
+  PersistedTask,
+  TaskResultCreate,
+  TaskUpdate,
+} from '../types/planning'
 
 interface ResolutionNotice {
   kind: 'success' | 'info'
@@ -46,7 +53,11 @@ export function ActivePlanPage() {
   const [isResolving, setIsResolving] = useState(false)
   const [resolutionError, setResolutionError] = useState<string | null>(null)
   const [resolutionNotice, setResolutionNotice] = useState<ResolutionNotice | null>(null)
+  const [editingTask, setEditingTask] = useState<PersistedTask | null>(null)
+  const [isUpdatingTask, setIsUpdatingTask] = useState(false)
+  const [taskUpdateError, setTaskUpdateError] = useState<string | null>(null)
   const resolutionInFlight = useRef(false)
+  const taskUpdateInFlight = useRef(false)
   const evaluationInFlight = useRef(false)
   const deletionInFlight = useRef(false)
   const planningInFlight = useRef(false)
@@ -147,9 +158,46 @@ export function ActivePlanPage() {
   }
 
   function selectTask(task: PersistedTask) {
+    setEditingTask(null)
+    setTaskUpdateError(null)
     setSelectedTask(task)
     setResolutionError(null)
     setResolutionNotice(null)
+  }
+
+  function editTask(task: PersistedTask) {
+    setSelectedTask(null)
+    setResolutionError(null)
+    setEditingTask(task)
+    setTaskUpdateError(null)
+  }
+
+  async function handleTaskUpdate(payload: TaskUpdate) {
+    if (!goalId || !editingTask || taskUpdateInFlight.current) return
+
+    taskUpdateInFlight.current = true
+    setIsUpdatingTask(true)
+    setTaskUpdateError(null)
+    try {
+      await updateTask(editingTask.id, payload)
+    } catch (cause) {
+      setTaskUpdateError(getTaskUpdateError(cause))
+      taskUpdateInFlight.current = false
+      setIsUpdatingTask(false)
+      return
+    }
+
+    try {
+      setPlan(await getGoalPlan(goalId))
+      setEditingTask(null)
+    } catch {
+      setTaskUpdateError(
+        'Los cambios se guardaron, pero no pudimos actualizar el plan. Recargá la página.',
+      )
+    } finally {
+      taskUpdateInFlight.current = false
+      setIsUpdatingTask(false)
+    }
   }
 
   async function handleTaskResult(payload: TaskResultCreate) {
@@ -397,6 +445,10 @@ export function ActivePlanPage() {
           <span>XP obtenido</span>
           <strong>{plan.progress.xp_earned}</strong>
         </div>
+        <div>
+          <span>Nivel</span>
+          <strong>{plan.progress.level}</strong>
+        </div>
       </section>
 
       {resolutionNotice && (
@@ -451,6 +503,20 @@ export function ActivePlanPage() {
               setResolutionError(null)
             }}
             onSubmit={handleTaskResult}
+          />
+        )}
+        editingTaskId={editingTask?.id ?? null}
+        onEditTask={editTask}
+        renderEditPanel={(task) => (
+          <TaskEditPanel
+            task={task}
+            isSubmitting={isUpdatingTask}
+            error={taskUpdateError}
+            onCancel={() => {
+              setEditingTask(null)
+              setTaskUpdateError(null)
+            }}
+            onSubmit={handleTaskUpdate}
           />
         )}
       />

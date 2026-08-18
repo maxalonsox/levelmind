@@ -100,6 +100,16 @@ export function getTaskResolutionError(error: unknown): string {
   return 'No pudimos registrar el resultado. Intentá nuevamente.'
 }
 
+export function getTaskUpdateError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 401) return 'Tu sesión venció. Volvé a iniciar sesión.'
+    if (error.status === 404) return 'No encontramos la tarea que querés editar.'
+    if (error.status === 409) return 'Esta tarea ya fue resuelta y no puede editarse.'
+    if (error.status === 422) return 'Revisá el título y la duración ingresados.'
+  }
+  return 'No pudimos guardar los cambios. La tarea conserva sus datos anteriores.'
+}
+
 export function getAdaptationPreviewError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 401) return 'Tu sesión venció. Volvé a iniciar sesión.'

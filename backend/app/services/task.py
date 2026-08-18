@@ -16,6 +16,7 @@ from app.schemas.task import (
     TaskResultCreate,
     TaskResultResponse,
     TaskResponse,
+    TaskUpdate,
 )
 from app.services.goal import get_owned_goal
 from app.services.memory_entry import add_memory_entry
@@ -23,6 +24,10 @@ from app.services.memory_entry import add_memory_entry
 
 class TaskAlreadyResolvedError(Exception):
     """Raised when changing the result of an already resolved Task."""
+
+
+class TaskNotEditableError(Exception):
+    """Raised when trying to edit a Task that is not pending."""
 
 
 def create_task(
@@ -47,6 +52,28 @@ def list_tasks(db: Session, mission_id: UUID, user_id: UUID) -> list[Task]:
             .order_by(Task.order_index.asc())
         )
     )
+
+
+def update_task(
+    db: Session,
+    task_id: UUID,
+    data: TaskUpdate,
+    user_id: UUID,
+) -> Task:
+    try:
+        task = _get_owned_task(db, task_id, user_id, for_update=True)
+        if PlanningStatus(task.status) is not PlanningStatus.PENDING:
+            raise TaskNotEditableError
+
+        for field, value in data.model_dump(exclude_unset=True).items():
+            setattr(task, field, value)
+
+        db.commit()
+        db.refresh(task)
+        return task
+    except Exception:
+        db.rollback()
+        raise
 
 
 def resolve_task(

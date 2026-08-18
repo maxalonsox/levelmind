@@ -47,6 +47,7 @@ export interface PersistedMission extends Omit<PlanMission, 'tasks'> {
   status: PlanningStatus
   created_at: string
   updated_at: string
+  estimated_duration_minutes?: number | null
   tasks: PersistedTask[]
 }
 
@@ -56,6 +57,7 @@ export interface PersistedStage extends Omit<PlanStage, 'missions'> {
   status: PlanningStatus
   created_at: string
   updated_at: string
+  estimated_duration_minutes?: number | null
   missions: PersistedMission[]
 }
 
@@ -66,6 +68,7 @@ export interface PersistedPlan {
 export interface PlanProgress {
   percentage: number
   xp_earned: number
+  level: number
   completed_tasks: number
   skipped_tasks: number
   pending_tasks: number
@@ -82,6 +85,12 @@ export interface TaskResultCreate {
   result: TaskResult
   difficulty_feedback: Difficulty | null
   feedback_text: string | null
+}
+
+export interface TaskUpdate {
+  title?: string
+  description?: string | null
+  estimated_duration_minutes?: number | null
 }
 
 export interface TaskResultResponse extends PersistedTask {

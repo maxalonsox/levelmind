@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.enums import Difficulty, PlanningStatus, TaskResult
 
@@ -37,6 +37,22 @@ class TaskResponse(BaseModel):
     xp_reward: int
     created_at: datetime
     updated_at: datetime
+
+
+class TaskUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = None
+    estimated_duration_minutes: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_patch(self) -> "TaskUpdate":
+        if not self.model_fields_set:
+            raise ValueError("At least one editable field is required")
+        if "title" in self.model_fields_set and self.title is None:
+            raise ValueError("title cannot be null")
+        return self
 
 
 class TaskResultCreate(BaseModel):

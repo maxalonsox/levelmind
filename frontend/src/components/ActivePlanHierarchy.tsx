@@ -8,6 +8,9 @@ interface ActivePlanHierarchyProps {
   selectedTaskId: string | null
   onSelectTask: (task: PersistedTask) => void
   renderResolutionPanel: (task: PersistedTask) => ReactNode
+  editingTaskId?: string | null
+  onEditTask?: (task: PersistedTask) => void
+  renderEditPanel?: (task: PersistedTask) => ReactNode
 }
 
 const difficultyLabels = {
@@ -28,6 +31,9 @@ export function ActivePlanHierarchy({
   selectedTaskId,
   onSelectTask,
   renderResolutionPanel,
+  editingTaskId = null,
+  onEditTask,
+  renderEditPanel,
 }: ActivePlanHierarchyProps) {
   const [openStages, setOpenStages] = useState<Set<string>>(() => new Set())
 
@@ -52,7 +58,7 @@ export function ActivePlanHierarchy({
             title={stage.title}
             description={stage.description}
             status={<StatusBadge status={stage.status} />}
-            summary={`${stage.missions.length} ${stage.missions.length === 1 ? 'misión' : 'misiones'} · ${taskCount} ${taskCount === 1 ? 'tarea' : 'tareas'}`}
+            summary={`${stage.missions.length} ${stage.missions.length === 1 ? 'misión' : 'misiones'} · ${taskCount} ${taskCount === 1 ? 'tarea' : 'tareas'}${stage.estimated_duration_minutes !== undefined && stage.estimated_duration_minutes !== null ? ` · ${formatDuration(stage.estimated_duration_minutes)}` : ''}`}
             isOpen={openStages.has(stage.id)}
             onToggle={() => toggleStage(stage.id)}
           >
@@ -67,6 +73,10 @@ export function ActivePlanHierarchy({
                       <StatusBadge status={mission.status} />
                     </div>
                     {mission.description && <p>{mission.description}</p>}
+                    {mission.estimated_duration_minutes !== undefined &&
+                      mission.estimated_duration_minutes !== null && (
+                        <p>{formatDuration(mission.estimated_duration_minutes)} estimados</p>
+                      )}
                   </div>
                   {mission.estimated_difficulty && (
                     <span className={`badge badge--${mission.estimated_difficulty}`}>
@@ -79,6 +89,7 @@ export function ActivePlanHierarchy({
                   {mission.tasks.map((task) => {
                     const isPending = task.status === 'pending'
                     const isSelected = selectedTaskId === task.id
+                    const isEditing = editingTaskId === task.id
 
                     return (
                       <li
@@ -110,16 +121,31 @@ export function ActivePlanHierarchy({
                           )}
                           <span>{task.xp_reward} XP</span>
                         </div>
-                        {isPending && !isSelected && (
-                          <button
-                            className="button button--secondary button--small task-row__action"
-                            onClick={() => onSelectTask(task)}
-                          >
-                            Registrar resultado
-                          </button>
+                        {isPending && !isSelected && !isEditing && (
+                          <div className="task-row__actions">
+                            {onEditTask && (
+                              <button
+                                className="button button--ghost button--small"
+                                type="button"
+                                onClick={() => onEditTask(task)}
+                              >
+                                Editar
+                              </button>
+                            )}
+                            <button
+                              className="button button--secondary button--small"
+                              type="button"
+                              onClick={() => onSelectTask(task)}
+                            >
+                              Registrar resultado
+                            </button>
+                          </div>
                         )}
                         {isSelected && (
                           <div className="task-row__resolution">{renderResolutionPanel(task)}</div>
+                        )}
+                        {isEditing && renderEditPanel && (
+                          <div className="task-row__resolution">{renderEditPanel(task)}</div>
                         )}
                       </li>
                     )
@@ -133,6 +159,13 @@ export function ActivePlanHierarchy({
       })}
     </div>
   )
+}
+
+function formatDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`
+  const hours = Math.floor(minutes / 60)
+  const remainingMinutes = minutes % 60
+  return remainingMinutes ? `${hours} h ${remainingMinutes} min` : `${hours} h`
 }
 
 function StatusBadge({ status }: { status: PlanningStatus }) {

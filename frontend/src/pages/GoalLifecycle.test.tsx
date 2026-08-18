@@ -42,6 +42,7 @@ const plan: GoalPlan = {
   progress: {
     percentage: 0,
     xp_earned: 0,
+    level: 1,
     completed_tasks: 0,
     skipped_tasks: 0,
     pending_tasks: 0,

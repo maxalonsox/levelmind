@@ -435,6 +435,7 @@ def test_get_plan_returns_ordered_hierarchy_feedback_progress_and_xp(
     assert body["progress"] == {
         "percentage": 50.0,
         "xp_earned": 35,
+        "level": 1,
         "completed_tasks": 2,
         "skipped_tasks": 1,
         "pending_tasks": 1,
@@ -458,6 +459,171 @@ def test_get_plan_returns_ordered_hierarchy_feedback_progress_and_xp(
     assert returned_tasks[1]["feedback_text"] == "Completed with tests."
     assert body["stages"][0]["missions"][0]["status"] == "skipped"
     assert body["stages"][0]["status"] == "in_progress"
+
+
+def test_get_plan_derives_level_and_aggregate_durations(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    goal, stage, mission, tasks = persist_hierarchy(
+        db_session, authenticated_user_id, task_count=2
+    )
+    tasks[0].estimated_duration_minutes = 35
+    tasks[1].estimated_duration_minutes = 55
+    tasks[0].xp_reward = 100
+    single_task_mission = Mission(title="Single task mission", order_index=1)
+    single_task_mission.tasks.append(
+        Task(
+            title="Single timed task",
+            order_index=0,
+            estimated_duration_minutes=30,
+        )
+    )
+    stage.missions.append(single_task_mission)
+    db_session.commit()
+
+    resolved = asyncio.run(
+        request("POST", f"/tasks/{tasks[0].id}/result", result_payload())
+    )
+    response = asyncio.run(request("GET", f"/goals/{goal.id}/plan"))
+
+    assert resolved.status_code == 200
+    assert response.status_code == 200
+    body = response.json()
+    assert body["progress"]["xp_earned"] == 100
+    assert body["progress"]["level"] == 2
+    assert body["stages"][0]["estimated_duration_minutes"] == 120
+    assert body["stages"][0]["missions"][0][
+        "estimated_duration_minutes"
+    ] == 90
+    assert body["stages"][0]["missions"][1][
+        "estimated_duration_minutes"
+    ] == 30
+
+
+def test_get_plan_does_not_report_partial_aggregate_duration(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    goal, _, _, tasks = persist_hierarchy(
+        db_session, authenticated_user_id, task_count=2
+    )
+    tasks[0].estimated_duration_minutes = 30
+    db_session.commit()
+
+    response = asyncio.run(request("GET", f"/goals/{goal.id}/plan"))
+
+    assert response.status_code == 200
+    assert response.json()["stages"][0]["estimated_duration_minutes"] is None
+    assert response.json()["stages"][0]["missions"][0][
+        "estimated_duration_minutes"
+    ] is None
+
+
+def test_edit_pending_task_updates_only_editable_fields(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    _, _, _, tasks = persist_hierarchy(db_session, authenticated_user_id)
+    task = tasks[0]
+    original_xp = task.xp_reward
+
+    response = asyncio.run(
+        request(
+            "PATCH",
+            f"/tasks/{task.id}",
+            {
+                "title": "Refinar endpoint",
+                "description": "Cubrir los casos límite",
+                "estimated_duration_minutes": 40,
+            },
+        )
+    )
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "Refinar endpoint"
+    assert response.json()["description"] == "Cubrir los casos límite"
+    assert response.json()["estimated_duration_minutes"] == 40
+    db_session.refresh(task)
+    assert task.title == "Refinar endpoint"
+    assert task.xp_reward == original_xp
+    assert task.status == PlanningStatus.PENDING
+
+
+def test_edit_task_enforces_ownership_and_missing_task(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    _, _, _, tasks = persist_hierarchy(db_session, uuid4())
+
+    forbidden = asyncio.run(
+        request("PATCH", f"/tasks/{tasks[0].id}", {"title": "No access"})
+    )
+    missing = asyncio.run(
+        request("PATCH", f"/tasks/{uuid4()}", {"title": "Missing"})
+    )
+
+    assert forbidden.status_code == 404
+    assert missing.status_code == 404
+    assert forbidden.json() == {"detail": "Task not found"}
+
+
+@pytest.mark.parametrize("terminal_status", ["completed", "skipped"])
+def test_terminal_task_cannot_be_edited(
+    terminal_status: str,
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    _, _, _, tasks = persist_hierarchy(db_session, authenticated_user_id)
+    task = tasks[0]
+    terminal_response = asyncio.run(
+        request(
+            "POST",
+            f"/tasks/{task.id}/result",
+            result_payload(result=terminal_status),
+        )
+    )
+
+    response = asyncio.run(
+        request("PATCH", f"/tasks/{task.id}", {"title": "Too late"})
+    )
+
+    assert terminal_response.status_code == 200
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Only pending Tasks can be edited"}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"title": ""},
+        {"title": None},
+        {"estimated_duration_minutes": 0},
+        {"estimated_duration_minutes": -1},
+        {"status": "completed"},
+        {"result": "completed"},
+        {"resolved_at": datetime.now().isoformat()},
+        {"xp_reward": 999},
+        {"feedback_text": "forbidden"},
+        {"mission_id": str(uuid4())},
+    ],
+)
+def test_edit_task_validates_payload_and_forbids_non_editable_fields(
+    payload: dict[str, Any],
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    _, _, _, tasks = persist_hierarchy(db_session, authenticated_user_id)
+    task = tasks[0]
+    original_title = task.title
+
+    response = asyncio.run(request("PATCH", f"/tasks/{task.id}", payload))
+
+    assert response.status_code == 422
+    db_session.refresh(task)
+    assert task.title == original_title
+    assert task.status == PlanningStatus.PENDING
 
 
 def test_get_plan_enforces_ownership(

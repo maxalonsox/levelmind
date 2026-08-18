@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { acceptGoalPlan, getActiveGoal } from '../api/goals'
 import { acceptAdaptation, previewGoalAdaptation, rejectAdaptation } from '../api/adaptations'
-import { resolveTask } from '../api/tasks'
+import { resolveTask, updateTask } from '../api/tasks'
 import type { PlanPreview, TaskResultCreate } from '../types/planning'
 import { apiRequest } from './api'
 import { supabase } from './supabase'
@@ -130,6 +130,20 @@ describe('apiRequest', () => {
     expect(new Headers(request?.headers).get('Authorization')).toBe(
       'Bearer supabase-access-token',
     )
+  })
+
+  it('patches only editable task fields', async () => {
+    const payload = {
+      title: 'Updated task',
+      estimated_duration_minutes: 45,
+    }
+
+    await updateTask('task/id', payload)
+
+    const [url, request] = vi.mocked(fetch).mock.calls[0]!
+    expect(url).toBe('http://api.test/tasks/task%2Fid')
+    expect(request?.method).toBe('PATCH')
+    expect(request?.body).toBe(JSON.stringify(payload))
   })
 
   it.each([
