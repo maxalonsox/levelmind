@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import { previewGoalAdaptation } from '../api/adaptations'
-import { getGoalPlan } from '../api/goals'
+import { deleteGoal, getGoalPlan } from '../api/goals'
 import { resolveTask } from '../api/tasks'
+import { useAuth } from '../auth/AuthContext'
 import { ActivePlanHierarchy } from '../components/ActivePlanHierarchy'
 import { Alert } from '../components/Alert'
 import { AppShell } from '../components/AppShell'
@@ -12,6 +13,7 @@ import { TaskResolutionPanel } from '../components/TaskResolutionPanel'
 import {
   getActivePlanError,
   getAdaptationPreviewError,
+  getGoalDeletionError,
   getTaskResolutionError,
   isActivePlanNotFoundError,
   isTaskAlreadyResolvedError,
@@ -26,6 +28,7 @@ interface ResolutionNotice {
 }
 
 export function ActivePlanPage() {
+  const { session } = useAuth()
   const { goalId } = useParams()
   const location = useLocation()
   const navigate = useNavigate()
@@ -44,6 +47,11 @@ export function ActivePlanPage() {
   const [resolutionNotice, setResolutionNotice] = useState<ResolutionNotice | null>(null)
   const resolutionInFlight = useRef(false)
   const evaluationInFlight = useRef(false)
+  const deletionInFlight = useRef(false)
+  const deleteConfirmButtonRef = useRef<HTMLButtonElement>(null)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deletionError, setDeletionError] = useState<string | null>(null)
 
   async function retryPlan() {
     if (!goalId) return
@@ -91,8 +99,29 @@ export function ActivePlanPage() {
   }, [goalId, routePlan])
 
   useEffect(() => {
-    if (goalId && plan) setLastActiveGoalId(goalId)
-  }, [goalId, plan])
+    if (goalId && plan && session?.user.id) {
+      setLastActiveGoalId(goalId, session.user.id)
+    }
+  }, [goalId, plan, session?.user.id])
+
+  useEffect(() => {
+    if (!isDeleteDialogOpen) return
+
+    const previouslyFocused = document.activeElement
+    deleteConfirmButtonRef.current?.focus()
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape' && !deletionInFlight.current) {
+        setIsDeleteDialogOpen(false)
+      }
+    }
+
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('keydown', handleEscape)
+      if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus()
+    }
+  }, [isDeleteDialogOpen])
 
   async function reviewPlan() {
     if (!goalId || !plan || evaluationInFlight.current) return
@@ -166,6 +195,23 @@ export function ActivePlanPage() {
     } finally {
       resolutionInFlight.current = false
       setIsResolving(false)
+    }
+  }
+
+  async function handleDeleteGoal() {
+    if (!goalId || deletionInFlight.current) return
+    deletionInFlight.current = true
+    setIsDeleting(true)
+    setDeletionError(null)
+    try {
+      await deleteGoal(goalId)
+      clearLastActiveGoalId()
+      navigate('/', { replace: true })
+    } catch (cause) {
+      setDeletionError(getGoalDeletionError(cause))
+    } finally {
+      deletionInFlight.current = false
+      setIsDeleting(false)
     }
   }
 
@@ -300,6 +346,61 @@ export function ActivePlanPage() {
           />
         )}
       />
+
+      <section className="plan-danger-zone">
+        <div>
+          <h2>Administrar plan</h2>
+          <p>Podés eliminar este objetivo y todo su progreso cuando ya no quieras conservarlo.</p>
+        </div>
+        <button
+          className="button button--danger button--small"
+          type="button"
+          onClick={() => {
+            setDeletionError(null)
+            setIsDeleteDialogOpen(true)
+          }}
+        >
+          Eliminar plan
+        </button>
+      </section>
+
+      {isDeleteDialogOpen && (
+        <div className="dialog-backdrop">
+          <section
+            className="confirmation-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-plan-title"
+            aria-describedby="delete-plan-description"
+          >
+            <h2 id="delete-plan-title">¿Eliminar este plan?</h2>
+            <p id="delete-plan-description">
+              Vas a eliminar este objetivo y dejar de acceder a su progreso. Esta acción no se
+              puede deshacer.
+            </p>
+            {deletionError && <Alert>{deletionError}</Alert>}
+            <div className="confirmation-dialog__actions">
+              <button
+                className="button button--secondary"
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setIsDeleteDialogOpen(false)}
+              >
+                Cancelar
+              </button>
+              <button
+                ref={deleteConfirmButtonRef}
+                className="button button--danger"
+                type="button"
+                disabled={isDeleting}
+                onClick={() => void handleDeleteGoal()}
+              >
+                {isDeleting ? 'Eliminando plan…' : 'Eliminar plan'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </AppShell>
   )
 }

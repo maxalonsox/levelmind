@@ -1,4 +1,7 @@
+import { useState } from 'react'
+
 import type { PlanPreview } from '../types/planning'
+import { CollapsibleStage } from './CollapsibleStage'
 
 interface PlanHierarchyProps {
   preview: PlanPreview
@@ -12,20 +15,33 @@ const difficultyLabels = {
 
 export function PlanHierarchy({ preview }: PlanHierarchyProps) {
   const stages = [...preview.stages].sort((left, right) => left.order_index - right.order_index)
+  const [openStages, setOpenStages] = useState<Set<string>>(() => new Set())
+
+  function toggleStage(stageKey: string) {
+    setOpenStages((current) => {
+      const next = new Set(current)
+      if (next.has(stageKey)) next.delete(stageKey)
+      else next.add(stageKey)
+      return next
+    })
+  }
 
   return (
     <div className="plan-tree">
-      {stages.map((stage, stageIndex) => (
-        <section className="stage-card" key={`${stage.order_index}-${stage.title}`}>
-          <header className="stage-card__header">
-            <span className="stage-card__index">Etapa {stageIndex + 1}</span>
-            <div>
-              <h2>{stage.title}</h2>
-              {stage.description && <p>{stage.description}</p>}
-            </div>
-          </header>
-
-          <div className="mission-list">
+      {stages.map((stage, stageIndex) => {
+        const stageKey = `${stage.order_index}-${stage.title}`
+        const taskCount = stage.missions.reduce((total, mission) => total + mission.tasks.length, 0)
+        return (
+          <CollapsibleStage
+            key={stageKey}
+            index={stageIndex}
+            title={stage.title}
+            description={stage.description}
+            summary={`${stage.missions.length} ${stage.missions.length === 1 ? 'misión' : 'misiones'} · ${taskCount} ${taskCount === 1 ? 'tarea' : 'tareas'}`}
+            isOpen={openStages.has(stageKey)}
+            onToggle={() => toggleStage(stageKey)}
+          >
+            <div className="mission-list">
             {[...stage.missions]
               .sort((left, right) => left.order_index - right.order_index)
               .map((mission, missionIndex) => (
@@ -67,9 +83,10 @@ export function PlanHierarchy({ preview }: PlanHierarchyProps) {
                   </ol>
                 </article>
               ))}
-          </div>
-        </section>
-      ))}
+            </div>
+          </CollapsibleStage>
+        )
+      })}
     </div>
   )
 }

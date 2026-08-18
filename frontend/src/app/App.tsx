@@ -7,11 +7,13 @@ import { LoginPage } from '../pages/LoginPage'
 import { ActivePlanPage } from '../pages/ActivePlanPage'
 import { AdaptationReviewPage } from '../pages/AdaptationReviewPage'
 import { PlanPreviewPage } from '../pages/PlanPreviewPage'
+import { RegisterPage } from '../pages/RegisterPage'
 
 export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
       <Route element={<ProtectedRoute />}>
         <Route index element={<HomePage />} />
         <Route path="/goals/new" element={<GoalStartPage />} />

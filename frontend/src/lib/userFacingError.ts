@@ -1,5 +1,27 @@
 import { ApiError } from './api'
 
+export function getRegistrationError(error: unknown): string {
+  const message = error instanceof Error ? error.message.toLowerCase() : ''
+  const status =
+    typeof error === 'object' && error !== null && 'status' in error
+      ? error.status
+      : undefined
+
+  if (message.includes('already registered') || message.includes('already been registered')) {
+    return 'Ya existe una cuenta con este email. Podés iniciar sesión.'
+  }
+  if (message.includes('invalid email') || message.includes('email address is invalid')) {
+    return 'Ingresá un email válido.'
+  }
+  if (message.includes('password') || message.includes('weak_password')) {
+    return 'La contraseña no cumple los requisitos mínimos. Usá al menos 6 caracteres.'
+  }
+  if (status === 429 || message.includes('rate limit') || message.includes('too many requests')) {
+    return 'Hay demasiados intentos en este momento. Esperá unos segundos e intentá nuevamente.'
+  }
+  return 'No pudimos crear tu cuenta. Intentá nuevamente.'
+}
+
 export function getGoalCreationError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 401) return 'Tu sesión venció. Volvé a iniciar sesión.'
@@ -43,6 +65,19 @@ export function getActivePlanError(error: unknown): string {
   }
 
   return 'No pudimos cargar el plan activo. Intentá nuevamente.'
+}
+
+export function isActiveGoalNotFoundError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404
+}
+
+export function getGoalDeletionError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 401) return 'Tu sesión venció. Volvé a iniciar sesión.'
+    if (error.status === 404) return 'Este plan ya no existe o no está disponible.'
+    if (error.status === 409) return 'El plan cambió y no puede eliminarse en este momento.'
+  }
+  return 'No pudimos eliminar el plan. No se aplicó ningún cambio.'
 }
 
 export function isActivePlanNotFoundError(error: unknown): boolean {

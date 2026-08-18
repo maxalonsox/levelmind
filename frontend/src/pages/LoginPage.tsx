@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../auth/AuthContext'
 import { Alert } from '../components/Alert'
@@ -108,7 +108,9 @@ export function LoginPage() {
             )}
           </button>
 
-          <p className="auth-card__footnote">Ingresá con tu cuenta de LevelMind para continuar.</p>
+          <p className="auth-card__footnote">
+            ¿No tenés cuenta? <Link to="/register">Crear cuenta</Link>
+          </p>
         </form>
       </section>
     </main>

@@ -3,6 +3,13 @@ import { useEffect, useState } from 'react'
 const STORAGE_KEY = 'levelmind:lastActiveGoalId'
 const CHANGE_EVENT = 'levelmind:last-active-goal-changed'
 
+interface ValidatedActiveGoal {
+  goalId: string
+  userId: string
+}
+
+let validatedActiveGoal: ValidatedActiveGoal | null = null
+
 export function getLastActiveGoalId(): string | null {
   try {
     return window.localStorage.getItem(STORAGE_KEY)
@@ -11,7 +18,8 @@ export function getLastActiveGoalId(): string | null {
   }
 }
 
-export function setLastActiveGoalId(goalId: string): void {
+export function setLastActiveGoalId(goalId: string, userId: string): void {
+  validatedActiveGoal = { goalId, userId }
   try {
     window.localStorage.setItem(STORAGE_KEY, goalId)
     window.dispatchEvent(new Event(CHANGE_EVENT))
@@ -21,6 +29,7 @@ export function setLastActiveGoalId(goalId: string): void {
 }
 
 export function clearLastActiveGoalId(): void {
+  validatedActiveGoal = null
   try {
     window.localStorage.removeItem(STORAGE_KEY)
     window.dispatchEvent(new Event(CHANGE_EVENT))
@@ -29,21 +38,22 @@ export function clearLastActiveGoalId(): void {
   }
 }
 
-export function useLastActiveGoalId(): string | null {
-  const [goalId, setGoalId] = useState(getLastActiveGoalId)
+export function useValidatedActiveGoalId(userId: string | undefined): string | null {
+  const [, setVersion] = useState(0)
 
   useEffect(() => {
     function refresh() {
-      setGoalId(getLastActiveGoalId())
+      setVersion((version) => version + 1)
     }
 
     window.addEventListener(CHANGE_EVENT, refresh)
-    window.addEventListener('storage', refresh)
-    return () => {
-      window.removeEventListener(CHANGE_EVENT, refresh)
-      window.removeEventListener('storage', refresh)
-    }
+    return () => window.removeEventListener(CHANGE_EVENT, refresh)
   }, [])
 
-  return goalId
+  return getValidatedActiveGoalId(userId)
+}
+
+function getValidatedActiveGoalId(userId: string | undefined): string | null {
+  if (!userId || validatedActiveGoal?.userId !== userId) return null
+  return validatedActiveGoal.goalId
 }

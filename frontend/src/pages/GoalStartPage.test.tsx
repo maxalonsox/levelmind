@@ -16,7 +16,10 @@ const apiMocks = vi.hoisted(() => ({
   previewGoalPlan: vi.fn(),
 }))
 
-vi.mock(import('../api/goals'), () => apiMocks)
+vi.mock(import('../api/goals'), async (importOriginal) => ({
+  ...(await importOriginal()),
+  ...apiMocks,
+}))
 
 const goal: Goal = {
   id: 'd499db65-7234-433a-8776-92bc02196ce6',
@@ -147,6 +150,8 @@ describe('GoalStartPage', () => {
       availability: goal.availability,
     })
     expect(apiMocks.previewGoalPlan).toHaveBeenCalledWith(goal.id)
+    expect(screen.queryByText('Crear una API validada')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Fundamentos de APIs/ }))
     expect(screen.getByText('Crear una API validada')).toBeInTheDocument()
     expect(screen.getByText('Implementar el primer endpoint')).toBeInTheDocument()
     expect(screen.getByText('Normal')).toBeInTheDocument()

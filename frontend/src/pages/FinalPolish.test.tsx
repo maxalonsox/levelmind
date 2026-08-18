@@ -7,7 +7,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthContext, type AuthContextValue } from '../auth/AuthContext'
 import { AppShell } from '../components/AppShell'
 import { ApiError } from '../lib/api'
-import { getLastActiveGoalId, setLastActiveGoalId } from '../lib/lastActiveGoal'
+import {
+  clearLastActiveGoalId,
+  getLastActiveGoalId,
+  setLastActiveGoalId,
+} from '../lib/lastActiveGoal'
 import type { GoalPlan } from '../types/planning'
 import { ActivePlanPage } from './ActivePlanPage'
 import { GoalStartPage } from './GoalStartPage'
@@ -15,11 +19,13 @@ import { HomePage } from './HomePage'
 import { LoginPage } from './LoginPage'
 
 const apiMocks = vi.hoisted(() => ({
+  getActiveGoal: vi.fn(),
   getGoalPlan: vi.fn(),
 }))
 
 vi.mock(import('../api/goals'), async (importOriginal) => ({
   ...(await importOriginal()),
+  getActiveGoal: apiMocks.getActiveGoal,
   getGoalPlan: apiMocks.getGoalPlan,
 }))
 
@@ -71,6 +77,8 @@ function renderAuthenticated(children: ReactNode, signOut?: AuthContextValue['si
 
 describe('final MVP navigation and session polish', () => {
   beforeEach(() => {
+    clearLastActiveGoalId()
+    apiMocks.getActiveGoal.mockReset()
     apiMocks.getGoalPlan.mockReset()
   })
 
@@ -86,9 +94,8 @@ describe('final MVP navigation and session polish', () => {
     expect(window.localStorage).toHaveLength(1)
   })
 
-  it('shows Mi plan and navigates to the stored goal', async () => {
-    setLastActiveGoalId(goalId)
-    const user = userEvent.setup()
+  it('does not show Mi plan from an unvalidated stored reference', () => {
+    window.localStorage.setItem('levelmind:lastActiveGoalId', goalId)
     renderAuthenticated(
       <MemoryRouter initialEntries={['/']}>
         <Routes>
@@ -98,17 +105,16 @@ describe('final MVP navigation and session polish', () => {
       </MemoryRouter>,
     )
 
-    const link = screen.getByRole('link', { name: 'Mi plan' })
-    expect(link).toHaveAttribute('href', `/goals/${goalId}`)
-    await user.click(link)
-    expect(screen.getByRole('heading', { name: 'Destino del plan' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Mi plan' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Destino del plan' })).not.toBeInTheDocument()
   })
 
-  it('offers Continuar con mi plan on Home without removing Crear objetivo', () => {
-    setLastActiveGoalId(goalId)
+  it('offers Continuar con mi plan on Home after backend recovery', async () => {
+    window.localStorage.setItem('levelmind:lastActiveGoalId', goalId)
+    apiMocks.getActiveGoal.mockResolvedValue({ id: goalId })
     renderAuthenticated(<MemoryRouter><HomePage /></MemoryRouter>)
 
-    expect(screen.getByRole('link', { name: /Continuar con mi plan/ })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: /Continuar con mi plan/ })).toHaveAttribute(
       'href',
       `/goals/${goalId}`,
     )
@@ -116,7 +122,7 @@ describe('final MVP navigation and session polish', () => {
   })
 
   it('clears a stale goal reference after the plan endpoint returns 404', async () => {
-    setLastActiveGoalId(goalId)
+    setLastActiveGoalId(goalId, 'user-id')
     apiMocks.getGoalPlan.mockRejectedValue(new ApiError('Goal not found', 404))
     renderAuthenticated(
       <MemoryRouter initialEntries={[`/goals/${goalId}`]}>
@@ -126,12 +132,13 @@ describe('final MVP navigation and session polish', () => {
 
     expect(await screen.findByText('No encontramos este plan.')).toBeInTheDocument()
     expect(getLastActiveGoalId()).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Mi plan' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Volver al inicio' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Crear objetivo' })).toBeInTheDocument()
   })
 
   it('clears the reference after a successful logout', async () => {
-    setLastActiveGoalId(goalId)
+    setLastActiveGoalId(goalId, 'user-id')
     const signOut = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     renderAuthenticated(
@@ -151,7 +158,7 @@ describe('final MVP navigation and session polish', () => {
   })
 
   it('handles logout errors, keeps the session reference, and shows feedback', async () => {
-    setLastActiveGoalId(goalId)
+    setLastActiveGoalId(goalId, 'user-id')
     const signOut = vi.fn().mockRejectedValue(new Error('private provider error'))
     const user = userEvent.setup()
     renderAuthenticated(

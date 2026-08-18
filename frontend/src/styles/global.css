@@ -345,6 +345,17 @@ p {
   gap: 0.75rem;
 }
 
+.button--danger {
+  border-color: rgba(255, 125, 145, 0.42);
+  color: #ffd6dd;
+  background: rgba(255, 125, 145, 0.1);
+}
+
+.button--danger:hover:not(:disabled) {
+  border-color: rgba(255, 125, 145, 0.7);
+  background: rgba(255, 125, 145, 0.16);
+}
+
 .hero-card h2 {
   max-width: 650px;
   margin-bottom: 1rem;
@@ -838,13 +849,93 @@ p {
   overflow: hidden;
 }
 
-.stage-card__header {
+.stage-card__toggle-heading {
+  margin: 0;
+}
+
+.stage-card__toggle {
+  position: relative;
   display: grid;
-  grid-template-columns: 84px 1fr;
+  width: 100%;
+  grid-template-columns: 84px minmax(0, 1fr) auto;
+  align-items: center;
   gap: 1.25rem;
-  padding: 1.75rem;
-  border-bottom: 1px solid var(--color-border);
+  padding: 1.4rem 1.75rem;
+  border: 0;
+  color: inherit;
   background: linear-gradient(105deg, rgba(77, 227, 212, 0.055), transparent 45%);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stage-card__toggle:hover,
+.stage-card__toggle:focus-visible {
+  background: linear-gradient(105deg, rgba(77, 227, 212, 0.09), rgba(140, 124, 246, 0.035));
+}
+
+.stage-card__toggle:focus-visible {
+  outline: 2px solid var(--color-cyan);
+  outline-offset: -2px;
+}
+
+.stage-card__heading-content {
+  display: grid;
+  min-width: 0;
+  gap: 0.35rem;
+}
+
+.stage-card__title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.stage-card__title {
+  font-size: 1.25rem;
+  font-weight: 750;
+  letter-spacing: -0.025em;
+}
+
+.stage-card__description,
+.stage-card__summary {
+  color: var(--color-text-muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.stage-card__summary {
+  color: #8fa5ba;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.stage-card__chevron {
+  color: var(--color-cyan);
+  font-size: 1.25rem;
+  transition: transform 160ms ease;
+}
+
+.stage-card__chevron[data-state="open"] {
+  transform: rotate(180deg);
+}
+
+.stage-card__content {
+  border-top: 1px solid var(--color-border);
+  animation: stage-content-in 160ms ease-out;
+}
+
+@keyframes stage-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .stage-card__index,
@@ -856,13 +947,6 @@ p {
   text-transform: uppercase;
 }
 
-.stage-card__header h2 {
-  margin: 0.25rem 0 0.5rem;
-  font-size: 1.35rem;
-  letter-spacing: -0.025em;
-}
-
-.stage-card__header p,
 .mission-card__heading p,
 .task-row__content p {
   margin-bottom: 0;
@@ -870,7 +954,6 @@ p {
   line-height: 1.5;
 }
 
-.stage-card__header p,
 .mission-card__heading p {
   font-size: 0.86rem;
 }
@@ -1680,6 +1763,65 @@ p {
   backdrop-filter: blur(14px);
 }
 
+.plan-danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-top: 2.5rem;
+  padding: 1.25rem 1.4rem;
+  border: 1px solid rgba(255, 125, 145, 0.18);
+  border-radius: var(--radius-md);
+  background: rgba(255, 125, 145, 0.035);
+}
+
+.plan-danger-zone h2 {
+  margin-bottom: 0.35rem;
+  font-size: 1rem;
+}
+
+.plan-danger-zone p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.84rem;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  z-index: 50;
+  display: grid;
+  inset: 0;
+  padding: 1.5rem;
+  background: rgba(2, 8, 17, 0.78);
+  place-items: center;
+  backdrop-filter: blur(8px);
+}
+
+.confirmation-dialog {
+  width: min(100%, 500px);
+  padding: 1.75rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.confirmation-dialog h2 {
+  margin-bottom: 0.75rem;
+}
+
+.confirmation-dialog > p {
+  color: var(--color-text-muted);
+  line-height: 1.6;
+}
+
+.confirmation-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
 .login-layout {
   display: grid;
   min-height: 100vh;
@@ -1790,6 +1932,25 @@ p {
 .auth-card__footnote {
   color: var(--color-text-muted);
   font-size: 0.9rem;
+}
+
+.auth-card__footnote a {
+  color: var(--color-cyan);
+  font-weight: 700;
+}
+
+.auth-card--confirmation {
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage-card__chevron {
+    transition: none;
+  }
+
+  .stage-card__content {
+    animation: none;
+  }
 }
 
 .field {
@@ -2077,8 +2238,13 @@ p {
     height: 76px;
   }
 
-  .stage-card__header {
+  .stage-card__toggle {
     grid-template-columns: 1fr;
+  }
+
+  .stage-card__chevron {
+    position: absolute;
+    right: 1.25rem;
   }
 
   .task-row {

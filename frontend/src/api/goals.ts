@@ -25,3 +25,13 @@ export function acceptGoalPlan(goalId: string, preview: PlanPreview): Promise<Pe
 export function getGoalPlan(goalId: string): Promise<GoalPlan> {
   return apiRequest<GoalPlan>(`/goals/${encodeURIComponent(goalId)}/plan`)
 }
+
+export function getActiveGoal(): Promise<Goal> {
+  return apiRequest<Goal>('/goals/active')
+}
+
+export function deleteGoal(goalId: string): Promise<void> {
+  return apiRequest<void>(`/goals/${encodeURIComponent(goalId)}`, {
+    method: 'DELETE',
+  })
+}

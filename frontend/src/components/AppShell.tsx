@@ -2,7 +2,7 @@ import { useState, type PropsWithChildren, type ReactNode } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../auth/AuthContext'
-import { clearLastActiveGoalId, useLastActiveGoalId } from '../lib/lastActiveGoal'
+import { clearLastActiveGoalId, useValidatedActiveGoalId } from '../lib/lastActiveGoal'
 import { Brand } from './Brand'
 
 interface AppShellProps extends PropsWithChildren {
@@ -15,7 +15,7 @@ interface AppShellProps extends PropsWithChildren {
 export function AppShell({ children, eyebrow, title, description, action }: AppShellProps) {
   const { session, signOut } = useAuth()
   const navigate = useNavigate()
-  const lastActiveGoalId = useLastActiveGoalId()
+  const activeGoalId = useValidatedActiveGoalId(session?.user.id)
   const [signOutError, setSignOutError] = useState<string | null>(null)
   const [isSigningOut, setIsSigningOut] = useState(false)
 
@@ -42,7 +42,7 @@ export function AppShell({ children, eyebrow, title, description, action }: AppS
             <NavLink to="/" end>
               Inicio
             </NavLink>
-            {lastActiveGoalId && <NavLink to={`/goals/${lastActiveGoalId}`}>Mi plan</NavLink>}
+            {activeGoalId && <NavLink to={`/goals/${activeGoalId}`}>Mi plan</NavLink>}
           </nav>
           <div className="topbar__account">
             <span className="topbar__email">{session?.user.email}</span>

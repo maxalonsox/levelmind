@@ -13,7 +13,10 @@ const apiMocks = vi.hoisted(() => ({
   resolveTask: vi.fn(),
 }))
 
-vi.mock(import('../api/goals'), () => ({ getGoalPlan: apiMocks.getGoalPlan }))
+vi.mock(import('../api/goals'), async (importOriginal) => ({
+  ...(await importOriginal()),
+  getGoalPlan: apiMocks.getGoalPlan,
+}))
 vi.mock(import('../api/tasks'), () => ({ resolveTask: apiMocks.resolveTask }))
 
 const goalId = 'goal-id'
@@ -131,6 +134,14 @@ function renderActivePlan() {
   )
 }
 
+async function expandActiveStage(user: ReturnType<typeof userEvent.setup>) {
+  const toggle = await screen.findByRole('button', { name: /Backend sólido/ })
+  expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await user.click(toggle)
+  expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  return toggle
+}
+
 function resolvedTask(
   result: 'completed' | 'skipped',
   difficultyFeedback: PersistedTask['difficulty_feedback'],
@@ -155,8 +166,11 @@ describe('task execution from the active plan', () => {
   it('renders the persisted hierarchy and only offers resolution for pending tasks', async () => {
     apiMocks.getGoalPlan.mockResolvedValue(planWith(pendingTask))
     renderActivePlan()
+    const user = userEvent.setup()
 
     expect(await screen.findByText('Backend sólido')).toBeInTheDocument()
+    expect(screen.queryByText('API de tareas')).not.toBeInTheDocument()
+    await expandActiveStage(user)
     expect(screen.getByText('API de tareas')).toBeInTheDocument()
     expect(screen.getByText('Implementar endpoint')).toBeInTheDocument()
     expect(screen.getByText('Diseñar contrato')).toBeInTheDocument()
@@ -182,6 +196,7 @@ describe('task execution from the active plan', () => {
     )
     renderActivePlan()
     const user = userEvent.setup()
+    const stageToggle = await expandActiveStage(user)
 
     await user.click(await screen.findByRole('button', { name: 'Registrar resultado' }))
     await user.click(screen.getByRole('radio', { name: /Completada/ }))
@@ -208,6 +223,7 @@ describe('task execution from the active plan', () => {
     expect(screen.getByText('15')).toBeInTheDocument()
     expect(screen.getByText('Tarea completada. +10 XP')).toBeInTheDocument()
     expect(screen.getAllByText('Completada').length).toBeGreaterThanOrEqual(3)
+    expect(stageToggle).toHaveAttribute('aria-expanded', 'true')
     expect(apiMocks.getGoalPlan).toHaveBeenCalledTimes(2)
     expect(apiMocks.getGoalPlan).toHaveBeenLastCalledWith(goalId)
     expect(screen.queryByRole('button', { name: 'Registrar resultado' })).not.toBeInTheDocument()
@@ -223,6 +239,7 @@ describe('task execution from the active plan', () => {
     apiMocks.resolveTask.mockResolvedValue(updatedTask)
     renderActivePlan()
     const user = userEvent.setup()
+    const stageToggle = await expandActiveStage(user)
 
     await user.click(await screen.findByRole('button', { name: 'Registrar resultado' }))
     await user.click(screen.getByRole('radio', { name: /Omitida/ }))
@@ -236,6 +253,7 @@ describe('task execution from the active plan', () => {
       })
     })
     expect(await screen.findByText('Resultado registrado. El plan ya está actualizado.')).toBeInTheDocument()
+    expect(stageToggle).toHaveAttribute('aria-expanded', 'true')
   })
 
   it('shows a readable error and does not apply an optimistic result', async () => {
@@ -243,6 +261,7 @@ describe('task execution from the active plan', () => {
     apiMocks.resolveTask.mockRejectedValue(new ApiError('database detail', 500))
     renderActivePlan()
     const user = userEvent.setup()
+    await expandActiveStage(user)
 
     await user.click(await screen.findByRole('button', { name: 'Registrar resultado' }))
     await user.click(screen.getByRole('radio', { name: /Completada/ }))
@@ -271,6 +290,7 @@ describe('task execution from the active plan', () => {
     apiMocks.resolveTask.mockRejectedValue(new ApiError('already terminal', 409))
     renderActivePlan()
     const user = userEvent.setup()
+    const stageToggle = await expandActiveStage(user)
 
     await user.click(await screen.findByRole('button', { name: 'Registrar resultado' }))
     await user.click(screen.getByRole('radio', { name: /Omitida/ }))
@@ -282,6 +302,7 @@ describe('task execution from the active plan', () => {
       ),
     ).toBeInTheDocument()
     expect(screen.getByText('100%')).toBeInTheDocument()
+    expect(stageToggle).toHaveAttribute('aria-expanded', 'true')
     expect(apiMocks.getGoalPlan).toHaveBeenCalledTimes(2)
     expect(screen.queryByRole('button', { name: 'Registrar resultado' })).not.toBeInTheDocument()
   })

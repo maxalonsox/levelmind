@@ -167,6 +167,8 @@ def test_provider_uses_alternate_base_url_and_configured_model(monkeypatch) -> N
         "timeout": 12.0,
         "max_retries": 0,
     }
+    assert len(completions.parse_calls) == 1
+    assert completions.create_calls == []
     assert completions.parse_calls[0]["model"] == "configured-provider-model"
 
 

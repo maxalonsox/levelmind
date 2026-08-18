@@ -1,10 +1,61 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
+import { getActiveGoal } from '../api/goals'
+import { useAuth } from '../auth/AuthContext'
+import { Alert } from '../components/Alert'
 import { AppShell } from '../components/AppShell'
-import { useLastActiveGoalId } from '../lib/lastActiveGoal'
+import {
+  clearLastActiveGoalId,
+  setLastActiveGoalId,
+} from '../lib/lastActiveGoal'
+import { isActiveGoalNotFoundError } from '../lib/userFacingError'
 
 export function HomePage() {
-  const lastActiveGoalId = useLastActiveGoalId()
+  const { session } = useAuth()
+  const currentUserId = session?.user.id
+  const [recovery, setRecovery] = useState({
+    userId: currentUserId,
+    isComplete: false,
+    error: null as string | null,
+    goalId: null as string | null,
+  })
+  const isRecoveringGoal = recovery.userId !== currentUserId || !recovery.isComplete
+  const recoveryError = recovery.userId === currentUserId ? recovery.error : null
+  const activeGoalId = recovery.userId === currentUserId ? recovery.goalId : null
+
+  useEffect(() => {
+    let isActive = true
+    clearLastActiveGoalId()
+    if (!currentUserId) {
+      return () => {
+        isActive = false
+      }
+    }
+
+    void getActiveGoal()
+      .then((goal) => {
+        if (!isActive) return
+        if (currentUserId) setLastActiveGoalId(goal.id, currentUserId)
+        setRecovery({ userId: currentUserId, isComplete: true, error: null, goalId: goal.id })
+      })
+      .catch((cause: unknown) => {
+        if (!isActive) return
+        clearLastActiveGoalId()
+        setRecovery({
+          userId: currentUserId,
+          isComplete: true,
+          goalId: null,
+          error: isActiveGoalNotFoundError(cause)
+            ? null
+            : 'No pudimos recuperar tu plan activo. Podés intentarlo recargando la página.',
+        })
+      })
+
+    return () => {
+      isActive = false
+    }
+  }, [currentUserId])
 
   return (
     <AppShell title="Tu camino empieza con un objetivo." eyebrow="Inicio">
@@ -24,18 +75,25 @@ export function HomePage() {
               plan, siempre vas a poder revisarlo.
             </p>
           </div>
+          {recoveryError && <Alert>{recoveryError}</Alert>}
           <div className="hero-card__actions">
-            {lastActiveGoalId && (
-              <Link className="button button--primary" to={`/goals/${lastActiveGoalId}`}>
-                Continuar con mi plan <span aria-hidden="true">→</span>
-              </Link>
+            {isRecoveringGoal ? (
+              <span className="button button--primary" role="status">Buscando tu plan…</span>
+            ) : (
+              <>
+                {activeGoalId && (
+                  <Link className="button button--primary" to={`/goals/${activeGoalId}`}>
+                    Continuar con mi plan <span aria-hidden="true">→</span>
+                  </Link>
+                )}
+                <Link
+                  className={`button ${activeGoalId ? 'button--secondary' : 'button--primary'}`}
+                  to="/goals/new"
+                >
+                  Crear objetivo <span aria-hidden="true">→</span>
+                </Link>
+              </>
             )}
-            <Link
-              className={`button ${lastActiveGoalId ? 'button--secondary' : 'button--primary'}`}
-              to="/goals/new"
-            >
-              Crear objetivo <span aria-hidden="true">→</span>
-            </Link>
           </div>
         </div>
       </section>

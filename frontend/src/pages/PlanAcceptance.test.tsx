@@ -18,7 +18,10 @@ const apiMocks = vi.hoisted(() => ({
   previewGoalPlan: vi.fn(),
 }))
 
-vi.mock(import('../api/goals'), () => apiMocks)
+vi.mock(import('../api/goals'), async (importOriginal) => ({
+  ...(await importOriginal()),
+  ...apiMocks,
+}))
 
 const goal: Goal = {
   id: 'e9d7145c-d348-4e8a-b411-d8e6ef54e6fc',
@@ -166,13 +169,21 @@ describe('initial plan acceptance', () => {
     apiMocks.previewGoalPlan.mockReset()
   })
 
-  it('shows the reviewed hierarchy and the accept action', () => {
+  it('shows the reviewed hierarchy collapsed and expands it on demand', async () => {
     renderPreview()
+    const user = userEvent.setup()
 
     expect(screen.getByText('Fundamentos backend')).toBeInTheDocument()
+    const toggle = screen.getByRole('button', { name: /Fundamentos backend/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('Construir una API')).not.toBeInTheDocument()
+    expect(screen.queryByText('Crear endpoint de Goal')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Aceptar plan' })).toBeInTheDocument()
+
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('Construir una API')).toBeInTheDocument()
     expect(screen.getByText('Crear endpoint de Goal')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Aceptar plan' })).toBeInTheDocument()
   })
 
   it('submits the same preview once, waits for persistence, and shows the active plan', async () => {
@@ -200,6 +211,8 @@ describe('initial plan acceptance', () => {
     expect(apiMocks.getGoalPlan).toHaveBeenCalledWith(goal.id)
     expect(screen.getAllByText('Plan activo')).toHaveLength(2)
     expect(screen.getByText('Fundamentos backend')).toBeInTheDocument()
+    expect(screen.queryByText('Crear endpoint de Goal')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Fundamentos backend/ }))
     expect(screen.getByText('Crear endpoint de Goal')).toBeInTheDocument()
     expect(apiMocks.previewGoalPlan).not.toHaveBeenCalled()
   })

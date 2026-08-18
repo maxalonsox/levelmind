@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 
 import type { PersistedStage, PersistedTask, PlanningStatus } from '../types/planning'
+import { CollapsibleStage } from './CollapsibleStage'
 
 interface ActivePlanHierarchyProps {
   stages: PersistedStage[]
@@ -28,22 +29,34 @@ export function ActivePlanHierarchy({
   onSelectTask,
   renderResolutionPanel,
 }: ActivePlanHierarchyProps) {
+  const [openStages, setOpenStages] = useState<Set<string>>(() => new Set())
+
+  function toggleStage(stageId: string) {
+    setOpenStages((current) => {
+      const next = new Set(current)
+      if (next.has(stageId)) next.delete(stageId)
+      else next.add(stageId)
+      return next
+    })
+  }
+
   return (
     <div className="plan-tree">
-      {stages.map((stage, stageIndex) => (
-        <section className={`stage-card stage-card--${stage.status}`} key={stage.id}>
-          <header className="stage-card__header">
-            <span className="stage-card__index">Etapa {stageIndex + 1}</span>
-            <div>
-              <div className="hierarchy-title-row">
-                <h2>{stage.title}</h2>
-                <StatusBadge status={stage.status} />
-              </div>
-              {stage.description && <p>{stage.description}</p>}
-            </div>
-          </header>
-
-          <div className="mission-list">
+      {stages.map((stage, stageIndex) => {
+        const taskCount = stage.missions.reduce((total, mission) => total + mission.tasks.length, 0)
+        return (
+          <CollapsibleStage
+            className={`stage-card--${stage.status}`}
+            key={stage.id}
+            index={stageIndex}
+            title={stage.title}
+            description={stage.description}
+            status={<StatusBadge status={stage.status} />}
+            summary={`${stage.missions.length} ${stage.missions.length === 1 ? 'misión' : 'misiones'} · ${taskCount} ${taskCount === 1 ? 'tarea' : 'tareas'}`}
+            isOpen={openStages.has(stage.id)}
+            onToggle={() => toggleStage(stage.id)}
+          >
+            <div className="mission-list">
             {stage.missions.map((mission, missionIndex) => (
               <article className={`mission-card mission-card--${mission.status}`} key={mission.id}>
                 <div className="mission-card__heading">
@@ -114,9 +127,10 @@ export function ActivePlanHierarchy({
                 </ol>
               </article>
             ))}
-          </div>
-        </section>
-      ))}
+            </div>
+          </CollapsibleStage>
+        )
+      })}
     </div>
   )
 }

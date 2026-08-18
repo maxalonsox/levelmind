@@ -28,7 +28,10 @@ vi.mock(import('../api/adaptations'), () => ({
   previewGoalAdaptation: apiMocks.previewGoalAdaptation,
   rejectAdaptation: apiMocks.rejectAdaptation,
 }))
-vi.mock(import('../api/goals'), () => ({ getGoalPlan: apiMocks.getGoalPlan }))
+vi.mock(import('../api/goals'), async (importOriginal) => ({
+  ...(await importOriginal()),
+  getGoalPlan: apiMocks.getGoalPlan,
+}))
 
 const goalId = 'goal-id'
 const adaptationId = 'adaptation-id'
@@ -306,7 +309,7 @@ describe('adaptation HITL flow', () => {
     expect(apiMocks.previewGoalAdaptation).toHaveBeenCalledOnce()
     expect(apiMocks.previewGoalAdaptation).toHaveBeenCalledWith(goalId)
     expect(screen.getByRole('button', { name: 'LevelMind está evaluando tu progreso reciente…' })).toBeDisabled()
-    expect(screen.getByText('Implement endpoint')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Backend/ })).toHaveAttribute('aria-expanded', 'false')
 
     finishPreview(noChangePreview)
     expect(await screen.findByRole('heading', { name: 'Tu plan sigue funcionando bien' })).toBeInTheDocument()
@@ -424,7 +427,7 @@ describe('adaptation HITL flow', () => {
     expect(apiMocks.rejectAdaptation).toHaveBeenCalledWith(goalId, adaptationId)
     expect(apiMocks.previewGoalAdaptation).toHaveBeenCalledOnce()
     expect(await screen.findByText('Mantuviste tu plan actual. No se aplicaron cambios.')).toBeInTheDocument()
-    expect(screen.getByText('Implement endpoint')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Backend/ })).toBeInTheDocument()
     expect(apiMocks.getGoalPlan).toHaveBeenCalledOnce()
   })
 
@@ -471,7 +474,7 @@ describe('adaptation HITL flow', () => {
     await user.click(await screen.findByRole('button', { name: 'Revisar mi plan' }))
 
     expect(await screen.findByText(message)).toBeInTheDocument()
-    expect(screen.getByText('Implement endpoint')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Backend/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Revisar mi plan' })).toBeEnabled()
   })
 
@@ -491,7 +494,7 @@ describe('adaptation HITL flow', () => {
     ).toBeInTheDocument()
     expect(document.body.textContent).not.toContain('OpenRouter')
     expect(document.body.textContent).not.toContain('429')
-    expect(screen.getByText('Implement endpoint')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Backend/ })).toBeInTheDocument()
   })
 
   it('keeps the generic fallback for other adaptation preview 502 errors', async () => {

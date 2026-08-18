@@ -1,10 +1,11 @@
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.models.goal import Goal
+from app.models.memory_entry import MemoryEntry
 from app.schemas.goal import GoalCreate
 
 
@@ -45,3 +46,33 @@ def get_owned_goal(
             detail="Goal not found",
         )
     return goal
+
+
+def get_active_goal(db: Session, user_id: UUID) -> Goal:
+    goal = db.scalar(
+        select(Goal)
+        .where(Goal.user_id == user_id, Goal.status == "active")
+        .order_by(Goal.created_at.desc(), Goal.id.desc())
+        .limit(1)
+    )
+    if goal is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Active goal not found",
+        )
+    return goal
+
+
+def delete_owned_goal(db: Session, goal_id: UUID, user_id: UUID) -> None:
+    try:
+        goal = get_owned_goal(db, goal_id, user_id, for_update=True)
+        db.execute(
+            delete(MemoryEntry).where(
+                MemoryEntry.goal_id == goal.id,
+            )
+        )
+        db.delete(goal)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
