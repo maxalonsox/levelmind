@@ -3,9 +3,12 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.enums import MemoryType
 from app.models.memory_entry import MemoryEntry
 from app.schemas.memory_entry import MemoryEntryCreate
 from app.services.goal import get_owned_goal
+
+RECENT_TASK_EXECUTION_MEMORY_LIMIT = 10
 
 
 def create_memory_entry(
@@ -60,3 +63,23 @@ def list_memory_entries(
         statement = statement.where(MemoryEntry.goal_id == goal_id)
 
     return list(db.scalars(statement.order_by(MemoryEntry.created_at, MemoryEntry.id)))
+
+
+def list_recent_task_execution_memories(
+    db: Session,
+    user_id: UUID,
+    goal_id: UUID,
+) -> list[MemoryEntry]:
+    get_owned_goal(db, goal_id, user_id)
+    statement = (
+        select(MemoryEntry)
+        .where(
+            MemoryEntry.user_id == user_id,
+            MemoryEntry.goal_id == goal_id,
+            MemoryEntry.memory_type == MemoryType.OBSERVED,
+            MemoryEntry.key == "task_execution",
+        )
+        .order_by(MemoryEntry.created_at.desc(), MemoryEntry.id.desc())
+        .limit(RECENT_TASK_EXECUTION_MEMORY_LIMIT)
+    )
+    return list(db.scalars(statement))

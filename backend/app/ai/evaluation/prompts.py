@@ -17,7 +17,10 @@ plan, propose concrete changes, create work, or make decisions for the user.
 
 Evidence rules:
 - Use only the supplied declared Goal, derived metrics, Mission summaries,
-  bounded feedback samples, and deterministic signals.
+  bounded feedback samples, deterministic signals, and recent observed Task
+  execution history.
+- Recent observed Task execution history is factual historical evidence, not a
+  declared preference or a permanent conclusion about the user.
 - Clearly distinguish observed facts from interpretations. Describe facts with
   counts or proportions. Phrase interpretations as cautious indications, not
   claims about the user's abilities or personal traits.
@@ -54,8 +57,11 @@ Markdown, code fences, recommendations, or fields absent from the schema.
 
 
 def build_evaluation_prompt(context: EvaluationContext) -> EvaluationPrompt:
+    context_data = context.model_dump(mode="json")
+    if not context.recent_observed_task_execution_history:
+        context_data.pop("recent_observed_task_execution_history")
     context_json = json.dumps(
-        context.model_dump(mode="json"), ensure_ascii=False
+        context_data, ensure_ascii=False
     )
     schema_json = json.dumps(
         EvaluationResult.model_json_schema(), ensure_ascii=False

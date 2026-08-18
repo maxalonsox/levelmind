@@ -13,7 +13,10 @@ from app.ai.evaluation.contracts import (
     EvaluationTemporalMetrics,
 )
 from app.ai.evaluation.errors import InvalidEvaluationResultError
-from app.ai.evaluation.prompts import EVALUATION_SYSTEM_PROMPT
+from app.ai.evaluation.prompts import (
+    EVALUATION_SYSTEM_PROMPT,
+    build_evaluation_prompt,
+)
 from app.services.evaluation import EvaluationService
 
 
@@ -150,4 +153,9 @@ def test_evaluation_prompt_requires_conservative_non_mutating_analysis() -> None
     assert "not failure" in prompt
     assert "one difficult task is not enough" in prompt
     assert "do not diagnose emotions, health, psychology" in prompt
+    assert "factual historical evidence" in prompt
+    assert "not a declared preference" in prompt
     assert "return only a json object" in prompt
+
+    user_prompt = build_evaluation_prompt(evaluation_context()).user
+    assert "recent_observed_task_execution_history" not in user_prompt

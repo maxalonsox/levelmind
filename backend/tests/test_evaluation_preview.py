@@ -21,6 +21,7 @@ from app.ai.evaluation.errors import (
 from app.api.evaluation_preview import get_evaluation_provider_factory
 from app.main import app
 from app.models.goal import Goal
+from app.models.memory_entry import MemoryEntry
 from app.models.mission import Mission
 from app.models.stage import Stage
 from app.models.task import Task
@@ -148,6 +149,24 @@ def test_evaluation_preview_passes_minimized_context_without_persisting(
 ) -> None:
     goal = persist_goal(db_session, authenticated_user_id)
     tasks = persist_plan(db_session, goal, resolved_tasks=3, pending_tasks=2)
+    db_session.add(
+        MemoryEntry(
+            user_id=authenticated_user_id,
+            goal_id=goal.id,
+            memory_type="observed",
+            key="task_execution",
+            value={
+                "result": "completed",
+                "estimated_difficulty": "normal",
+                "difficulty_feedback": "difficult",
+                "feedback_text": "Do not duplicate this text.",
+            },
+            source_type="task",
+            source_id=tasks[0].id,
+            confidence=1,
+        )
+    )
+    db_session.commit()
     provider = FakeProvider(result=valid_result())
     before_counts = (
         db_session.scalar(select(func.count()).select_from(Stage)),
@@ -173,9 +192,20 @@ def test_evaluation_preview_passes_minimized_context_without_persisting(
     assert context.metrics.total_tasks == 5
     assert context.metrics.completed_tasks == 3
     assert context.metrics.xp_earned == 30
+    assert [
+        observation.model_dump(mode="json")
+        for observation in context.recent_observed_task_execution_history
+    ] == [
+        {
+            "result": "completed",
+            "estimated_difficulty": "normal",
+            "difficulty_feedback": "difficult",
+        }
+    ]
     context_text = str(context.model_dump(mode="json"))
     assert str(goal.id) not in context_text
     assert str(goal.user_id) not in context_text
+    assert "Do not duplicate this text." not in context_text
     assert (
         db_session.scalar(select(func.count()).select_from(Stage)),
         db_session.scalar(select(func.count()).select_from(Mission)),

@@ -55,6 +55,9 @@ def build_adaptation_context(
                 locations, evaluation_context, evaluation
             )
         ],
+        recent_observed_task_execution_history=(
+            evaluation_context.recent_observed_task_execution_history
+        ),
     )
 
 

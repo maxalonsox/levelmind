@@ -13,4 +13,6 @@ def test_adaptation_prompt_requires_minimal_evidence_based_changes() -> None:
     assert "do not add work merely to fill availability" in prompt
     assert "one verifiable result" in prompt
     assert "never use uuids" in prompt
+    assert "factual historical evidence" in prompt
+    assert "not a declared preference" in prompt
     assert "return only one json object" in prompt

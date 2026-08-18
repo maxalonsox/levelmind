@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -10,6 +11,7 @@ from app.ai.evaluation.contracts import (
     EvaluationGoalContext,
     EvaluationMetrics,
     EvaluationMissionSummary,
+    RecentTaskExecutionObservation,
     EvaluationResult,
     EvaluationSeverity,
     EvaluationSignal,
@@ -22,6 +24,7 @@ from app.models.mission import Mission
 from app.models.stage import Stage
 from app.models.task import Task
 from app.services.goal import get_owned_goal
+from app.services.memory_entry import list_recent_task_execution_memories
 
 
 def build_evaluation_context(
@@ -153,7 +156,38 @@ def build_evaluation_context(
         deterministic_signals=_deterministic_signals(
             metrics, feedback_metrics, mission_summaries
         ),
+        recent_observed_task_execution_history=(
+            _recent_task_execution_history(db, user_id, goal_id)
+        ),
     )
+
+
+def _recent_task_execution_history(
+    db: Session,
+    user_id: UUID,
+    goal_id: UUID,
+) -> list[RecentTaskExecutionObservation]:
+    observations: list[RecentTaskExecutionObservation] = []
+    for memory in list_recent_task_execution_memories(
+        db, user_id, goal_id
+    ):
+        try:
+            observations.append(
+                RecentTaskExecutionObservation.model_validate(
+                    {
+                        "result": memory.value.get("result"),
+                        "estimated_difficulty": memory.value.get(
+                            "estimated_difficulty"
+                        ),
+                        "difficulty_feedback": memory.value.get(
+                            "difficulty_feedback"
+                        ),
+                    }
+                )
+            )
+        except (AttributeError, ValidationError):
+            continue
+    return observations
 
 
 def has_insufficient_evidence(context: EvaluationContext) -> bool:

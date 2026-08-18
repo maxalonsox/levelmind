@@ -15,6 +15,7 @@ from app.api.adaptation_preview import get_adaptation_provider_factory
 from app.api.evaluation_preview import get_evaluation_provider_factory
 from app.main import app
 from app.models.goal import Goal
+from app.models.memory_entry import MemoryEntry
 from app.models.mission import Mission
 from app.models.plan_adaptation import PlanAdaptation
 from app.models.plan_revision import PlanRevision
@@ -199,6 +200,24 @@ def test_adaptation_preview_persists_validated_pending_proposal_without_mutation
 ) -> None:
     goal = persist_goal(db_session, authenticated_user_id)
     tasks = persist_plan(db_session, goal)
+    db_session.add(
+        MemoryEntry(
+            user_id=authenticated_user_id,
+            goal_id=goal.id,
+            memory_type="observed",
+            key="task_execution",
+            value={
+                "result": "completed",
+                "estimated_difficulty": "normal",
+                "difficulty_feedback": "difficult",
+                "feedback_text": "Must not enter either LLM context.",
+            },
+            source_type="task",
+            source_id=tasks[0].id,
+            confidence=1,
+        )
+    )
+    db_session.commit()
     evaluator = FakeEvaluationProvider(
         evaluation_result(needs_adaptation=True)
     )
@@ -236,10 +255,20 @@ def test_adaptation_preview_persists_validated_pending_proposal_without_mutation
     assert payload["adaptation"]["created_at"] is not None
     assert payload["adaptation"]["updated_at"] is not None
     assert len(adapter.contexts) == 1
+    assert len(evaluator.contexts) == 1
     assert adapter.closed is True
+    evaluation_memory = (
+        evaluator.contexts[0].recent_observed_task_execution_history
+    )
+    adaptation_memory = (
+        adapter.contexts[0].recent_observed_task_execution_history
+    )
+    assert adaptation_memory == evaluation_memory
+    assert len(adaptation_memory) == 1
     context_text = str(adapter.contexts[0].model_dump(mode="json"))
     assert str(goal.id) not in context_text
     assert str(goal.user_id) not in context_text
+    assert "Must not enter either LLM context." not in context_text
     db_session.expire_all()
     persisted_adaptation = db_session.scalar(select(PlanAdaptation))
     assert persisted_adaptation is not None

@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.ai.evaluation.contracts import (
     EvaluationGoalContext,
     EvaluationResult,
+    RecentTaskExecutionObservation,
 )
 from app.models.enums import Difficulty, PlanningStatus
 
@@ -158,6 +159,9 @@ class AdaptationContext(_AdaptationModel):
     evaluation: EvaluationResult
     plan_outline: list[AdaptationStageOutline]
     relevant_tasks: list[RelevantAdaptationTask] = Field(max_length=12)
+    recent_observed_task_execution_history: list[
+        RecentTaskExecutionObservation
+    ] = Field(default_factory=list, max_length=10)
 
 
 class AdaptationLLMProvider(Protocol):

@@ -4,7 +4,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import Difficulty, PlanningStatus
+from app.models.enums import Difficulty, PlanningStatus, TaskResult
 
 
 class EvaluationStatus(StrEnum):
@@ -112,6 +112,14 @@ class EvaluationFeedbackSample(BaseModel):
     feedback_text: str = Field(min_length=1, max_length=2000)
 
 
+class RecentTaskExecutionObservation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    result: TaskResult
+    estimated_difficulty: Difficulty | None
+    difficulty_feedback: Difficulty | None
+
+
 class EvaluationContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -122,6 +130,9 @@ class EvaluationContext(BaseModel):
     missions: list[EvaluationMissionSummary]
     feedback_samples: list[EvaluationFeedbackSample] = Field(max_length=10)
     deterministic_signals: list[EvaluationSignal]
+    recent_observed_task_execution_history: list[
+        RecentTaskExecutionObservation
+    ] = Field(default_factory=list, max_length=10)
 
 
 class EvaluationLLMProvider(Protocol):

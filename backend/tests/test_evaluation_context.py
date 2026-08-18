@@ -1,5 +1,5 @@
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.orm import Session
@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.ai.evaluation.contracts import EvaluationSignalType
 from app.models.enums import PlanningStatus
 from app.models.goal import Goal
+from app.models.memory_entry import MemoryEntry
 from app.models.mission import Mission
 from app.models.stage import Stage
 from app.models.task import Task
@@ -167,6 +168,7 @@ def test_evaluation_context_builds_minimized_metrics_and_summaries(
         "difficult_feedback_count": 1,
     }
     assert len(context.feedback_samples) == 2
+    assert context.recent_observed_task_execution_history == []
 
     serialized = context.model_dump(mode="json")
     serialized_text = str(serialized)
@@ -174,6 +176,54 @@ def test_evaluation_context_builds_minimized_metrics_and_summaries(
     assert str(goal.id) not in serialized_text
     assert "Task details must not enter EvaluationContext" not in serialized_text
     assert "Completed difficult Task" not in serialized_text
+
+
+def test_evaluation_context_includes_only_structured_memory_observations(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    goal = persist_goal(db_session, authenticated_user_id)
+    add_mission(
+        db_session,
+        goal,
+        [resolved_task("Completed Task", 0, difficulty="difficult")],
+    )
+    db_session.add(
+        MemoryEntry(
+            user_id=authenticated_user_id,
+            goal_id=goal.id,
+            memory_type="observed",
+            key="task_execution",
+            value={
+                "result": "completed",
+                "estimated_difficulty": "normal",
+                "difficulty_feedback": "difficult",
+                "feedback_text": "Must not enter cognitive context.",
+            },
+            source_type="task",
+            source_id=uuid4(),
+            confidence=1,
+        )
+    )
+    db_session.commit()
+
+    context = build_evaluation_context(
+        db_session, goal.id, authenticated_user_id
+    )
+
+    assert [
+        observation.model_dump(mode="json")
+        for observation in context.recent_observed_task_execution_history
+    ] == [
+        {
+            "result": "completed",
+            "estimated_difficulty": "normal",
+            "difficulty_feedback": "difficult",
+        }
+    ]
+    assert "feedback_text" not in str(
+        context.recent_observed_task_execution_history
+    )
 
 
 @pytest.mark.parametrize(

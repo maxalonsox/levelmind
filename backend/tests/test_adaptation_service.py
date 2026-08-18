@@ -15,6 +15,7 @@ from app.ai.adaptation.errors import (
     InvalidAdaptationProposalError,
     InvalidAdaptationTargetError,
 )
+from app.ai.adaptation.prompts import build_adaptation_prompt
 from app.ai.evaluation.contracts import EvaluationGoalContext, EvaluationResult
 from app.services.adaptation import AdaptationService
 
@@ -140,6 +141,10 @@ def test_adaptation_service_short_circuits_without_provider() -> None:
 def test_adaptation_service_validates_and_returns_provider_proposal() -> None:
     context = adaptation_context()
     provider = FakeProvider(valid_proposal())
+    assert (
+        "recent_observed_task_execution_history"
+        not in build_adaptation_prompt(context).user
+    )
 
     result = asyncio.run(
         AdaptationService(lambda: provider).propose(

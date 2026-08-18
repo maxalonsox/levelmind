@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -14,6 +15,10 @@ from app.db.base import Base
 from app.main import app
 from app.models.goal import Goal
 from app.models.memory_entry import MemoryEntry
+from app.services.memory_entry import (
+    RECENT_TASK_EXECUTION_MEMORY_LIMIT,
+    list_recent_task_execution_memories,
+)
 
 
 async def request_memory_entries(
@@ -293,3 +298,93 @@ def test_memory_table_is_registered_at_alembic_head() -> None:
         "confidence",
         "created_at",
     }
+
+
+def test_recent_task_execution_memory_is_owned_filtered_ordered_and_limited(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    goal = add_goal(db_session, authenticated_user_id)
+    other_goal = add_goal(db_session, authenticated_user_id)
+    first_created_at = datetime(2026, 8, 1, tzinfo=UTC)
+    matching_source_ids = [uuid4() for _ in range(12)]
+    matching = [
+        MemoryEntry(
+            user_id=authenticated_user_id,
+            goal_id=goal.id,
+            memory_type="observed",
+            key="task_execution",
+            value={
+                "result": "completed",
+                "estimated_difficulty": "normal",
+                "difficulty_feedback": "normal",
+            },
+            source_type="task",
+            source_id=source_id,
+            confidence=1,
+            created_at=first_created_at + timedelta(minutes=index),
+        )
+        for index, source_id in enumerate(matching_source_ids)
+    ]
+    excluded = [
+        MemoryEntry(
+            user_id=authenticated_user_id,
+            goal_id=other_goal.id,
+            memory_type="observed",
+            key="task_execution",
+            value={"result": "skipped"},
+            source_type="task",
+            confidence=1,
+        ),
+        MemoryEntry(
+            user_id=uuid4(),
+            goal_id=goal.id,
+            memory_type="observed",
+            key="task_execution",
+            value={"result": "skipped"},
+            source_type="task",
+            confidence=1,
+        ),
+        MemoryEntry(
+            user_id=authenticated_user_id,
+            goal_id=goal.id,
+            memory_type="declared",
+            key="task_execution",
+            value={"result": "skipped"},
+            source_type="user_input",
+            confidence=1,
+        ),
+        MemoryEntry(
+            user_id=authenticated_user_id,
+            goal_id=goal.id,
+            memory_type="observed",
+            key="another_key",
+            value={"result": "skipped"},
+            source_type="task",
+            confidence=1,
+        ),
+        MemoryEntry(
+            user_id=authenticated_user_id,
+            goal_id=None,
+            memory_type="observed",
+            key="task_execution",
+            value={"result": "skipped"},
+            source_type="task",
+            confidence=1,
+        ),
+    ]
+    db_session.add_all([*matching, *excluded])
+    db_session.commit()
+
+    memories = list_recent_task_execution_memories(
+        db_session, authenticated_user_id, goal.id
+    )
+
+    assert len(memories) == RECENT_TASK_EXECUTION_MEMORY_LIMIT == 10
+    assert [memory.source_id for memory in memories] == list(
+        reversed(matching_source_ids[2:])
+    )
+    assert all(memory.user_id == authenticated_user_id for memory in memories)
+    assert all(memory.goal_id == goal.id for memory in memories)
+    assert all(memory.memory_type == "observed" for memory in memories)
+    assert all(memory.key == "task_execution" for memory in memories)
