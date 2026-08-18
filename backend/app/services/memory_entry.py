@@ -13,6 +13,21 @@ def create_memory_entry(
     data: MemoryEntryCreate,
     user_id: UUID,
 ) -> MemoryEntry:
+    try:
+        entry = add_memory_entry(db, data, user_id)
+        db.commit()
+        db.refresh(entry)
+        return entry
+    except Exception:
+        db.rollback()
+        raise
+
+
+def add_memory_entry(
+    db: Session,
+    data: MemoryEntryCreate,
+    user_id: UUID,
+) -> MemoryEntry:
     if data.goal_id is not None:
         get_owned_goal(db, data.goal_id, user_id)
 
@@ -27,8 +42,7 @@ def create_memory_entry(
         confidence=data.confidence,
     )
     db.add(entry)
-    db.commit()
-    db.refresh(entry)
+    db.flush()
     return entry
 
 

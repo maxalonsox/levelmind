@@ -12,9 +12,11 @@ from app.api.plan_preview import get_planning_provider
 from app.main import app
 from app.models.enums import PlanningStatus
 from app.models.goal import Goal
+from app.models.memory_entry import MemoryEntry
 from app.models.mission import Mission
 from app.models.stage import Stage
 from app.models.task import Task
+from app.services import task as task_service
 
 
 async def request(
@@ -125,6 +127,23 @@ def test_complete_task_records_feedback_xp_and_completes_ancestors(
     assert stage.status == PlanningStatus.COMPLETED
     assert goal.status == "completed"
 
+    memories = list(db_session.scalars(select(MemoryEntry)))
+    assert len(memories) == 1
+    memory = memories[0]
+    assert memory.user_id == authenticated_user_id
+    assert memory.goal_id == goal.id
+    assert memory.memory_type == "observed"
+    assert memory.key == "task_execution"
+    assert memory.source_type == "task"
+    assert memory.source_id == task.id
+    assert memory.confidence == 1.0
+    assert memory.value == {
+        "result": "completed",
+        "estimated_difficulty": "easy",
+        "difficulty_feedback": "normal",
+    }
+    assert "feedback_text" not in memory.value
+
 
 def test_skip_task_records_feedback_without_xp_and_skips_ancestors(
     db_session: Session,
@@ -163,6 +182,15 @@ def test_skip_task_records_feedback_without_xp_and_skips_ancestors(
     assert stage.status == PlanningStatus.SKIPPED
     assert goal.status == "active"
 
+    memories = list(db_session.scalars(select(MemoryEntry)))
+    assert len(memories) == 1
+    assert memories[0].value == {
+        "result": "skipped",
+        "estimated_difficulty": None,
+        "difficulty_feedback": "difficult",
+    }
+    assert "feedback_text" not in memories[0].value
+
 
 def test_repeating_same_result_is_idempotent(
     db_session: Session,
@@ -185,6 +213,7 @@ def test_repeating_same_result_is_idempotent(
     db_session.refresh(task)
     assert task.resolved_at == first_resolved_at
     assert task.updated_at == first_updated_at
+    assert len(list(db_session.scalars(select(MemoryEntry)))) == 1
 
     plan_response = asyncio.run(request("GET", f"/goals/{goal.id}/plan"))
     assert plan_response.json()["progress"]["xp_earned"] == task.xp_reward
@@ -223,6 +252,7 @@ def test_terminal_task_result_cannot_be_changed(
     assert task.status == initial_result
     assert task.resolved_at == resolved_at
     assert task.feedback_text == feedback_text
+    assert len(list(db_session.scalars(select(MemoryEntry)))) == 1
 
 
 def test_task_result_enforces_ownership(
@@ -479,3 +509,47 @@ def test_task_result_rolls_back_task_and_parent_updates_on_failure(
     assert mission.status == PlanningStatus.PENDING
     assert stage.status == PlanningStatus.PENDING
     assert goal.status == "active"
+    assert db_session.scalar(select(MemoryEntry)) is None
+
+
+def test_task_result_rolls_back_when_memory_creation_fails(
+    db_session: Session,
+    authenticated_user_id: UUID,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    goal, stage, mission, tasks = persist_hierarchy(
+        db_session, authenticated_user_id
+    )
+    task = tasks[0]
+
+    def fail_memory_creation(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("Deliberate memory creation failure")
+
+    monkeypatch.setattr(
+        task_service,
+        "add_memory_entry",
+        fail_memory_creation,
+    )
+
+    response = asyncio.run(
+        request(
+            "POST",
+            f"/tasks/{task.id}/result",
+            result_payload(),
+        )
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Failed to record Task result"}
+    db_session.refresh(task)
+    db_session.refresh(mission)
+    db_session.refresh(stage)
+    db_session.refresh(goal)
+    assert task.status == PlanningStatus.PENDING
+    assert task.difficulty_feedback is None
+    assert task.feedback_text is None
+    assert task.resolved_at is None
+    assert mission.status == PlanningStatus.PENDING
+    assert stage.status == PlanningStatus.PENDING
+    assert goal.status == "active"
+    assert db_session.scalar(select(MemoryEntry)) is None

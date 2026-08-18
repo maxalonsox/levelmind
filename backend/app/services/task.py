@@ -5,11 +5,12 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.enums import PlanningStatus
+from app.models.enums import MemoryType, PlanningStatus
 from app.models.goal import Goal
 from app.models.mission import Mission
 from app.models.stage import Stage
 from app.models.task import Task
+from app.schemas.memory_entry import MemoryEntryCreate
 from app.schemas.task import (
     TaskCreate,
     TaskResultCreate,
@@ -17,6 +18,7 @@ from app.schemas.task import (
     TaskResponse,
 )
 from app.services.goal import get_owned_goal
+from app.services.memory_entry import add_memory_entry
 
 
 class TaskAlreadyResolvedError(Exception):
@@ -122,6 +124,28 @@ def resolve_task(
             goal.status = "completed"
         elif goal.status != "archived":
             goal.status = "active"
+
+        add_memory_entry(
+            db,
+            MemoryEntryCreate(
+                goal_id=goal.id,
+                memory_type=MemoryType.OBSERVED,
+                key="task_execution",
+                value={
+                    "result": data.result.value,
+                    "estimated_difficulty": task.estimated_difficulty,
+                    "difficulty_feedback": (
+                        data.difficulty_feedback.value
+                        if data.difficulty_feedback is not None
+                        else None
+                    ),
+                },
+                source_type="task",
+                source_id=task.id,
+                confidence=1.0,
+            ),
+            user_id,
+        )
 
         xp_awarded = (
             task.xp_reward
