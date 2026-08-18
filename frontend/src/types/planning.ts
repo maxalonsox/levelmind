@@ -1,5 +1,6 @@
 export type Difficulty = 'easy' | 'normal' | 'difficult'
 export type PlanningStatus = 'pending' | 'in_progress' | 'completed' | 'skipped'
+export type TaskResult = 'completed' | 'skipped'
 
 export interface PlanTask {
   title: string
@@ -75,4 +76,14 @@ export interface GoalPlan extends PersistedPlan {
   goal_id: string
   status: string
   progress: PlanProgress
+}
+
+export interface TaskResultCreate {
+  result: TaskResult
+  difficulty_feedback: Difficulty | null
+  feedback_text: string | null
+}
+
+export interface TaskResultResponse extends PersistedTask {
+  xp_awarded: number
 }

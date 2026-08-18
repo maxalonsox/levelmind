@@ -44,3 +44,18 @@ export function getActivePlanError(error: unknown): string {
 
   return 'No pudimos cargar el plan activo. Intentá nuevamente.'
 }
+
+export function isTaskAlreadyResolvedError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 409
+}
+
+export function getTaskResolutionError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 401) return 'Tu sesión venció. Volvé a iniciar sesión.'
+    if (error.status === 404) return 'No encontramos la tarea que querés actualizar.'
+    if (error.status === 422) return 'Revisá el resultado y el feedback ingresados.'
+    if (error.status === 500) return 'No pudimos guardar el resultado. Ningún cambio parcial fue aplicado.'
+  }
+
+  return 'No pudimos registrar el resultado. Intentá nuevamente.'
+}

@@ -1,14 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 
 import { getGoalPlan } from '../api/goals'
+import { resolveTask } from '../api/tasks'
+import { ActivePlanHierarchy } from '../components/ActivePlanHierarchy'
 import { Alert } from '../components/Alert'
 import { AppShell } from '../components/AppShell'
 import { LoadingState } from '../components/LoadingState'
-import { PlanHierarchy } from '../components/PlanHierarchy'
-import { getActivePlanError } from '../lib/userFacingError'
+import { TaskResolutionPanel } from '../components/TaskResolutionPanel'
+import {
+  getActivePlanError,
+  getTaskResolutionError,
+  isTaskAlreadyResolvedError,
+} from '../lib/userFacingError'
 import type { Goal } from '../types/goals'
-import type { GoalPlan } from '../types/planning'
+import type { GoalPlan, PersistedTask, TaskResultCreate } from '../types/planning'
+
+interface ResolutionNotice {
+  kind: 'success' | 'info'
+  message: string
+}
 
 export function ActivePlanPage() {
   const { goalId } = useParams()
@@ -17,6 +28,11 @@ export function ActivePlanPage() {
   const [plan, setPlan] = useState<GoalPlan | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedTask, setSelectedTask] = useState<PersistedTask | null>(null)
+  const [isResolving, setIsResolving] = useState(false)
+  const [resolutionError, setResolutionError] = useState<string | null>(null)
+  const [resolutionNotice, setResolutionNotice] = useState<ResolutionNotice | null>(null)
+  const resolutionInFlight = useRef(false)
 
   async function retryPlan() {
     if (!goalId) return
@@ -51,6 +67,62 @@ export function ActivePlanPage() {
       isActive = false
     }
   }, [goalId])
+
+  function selectTask(task: PersistedTask) {
+    setSelectedTask(task)
+    setResolutionError(null)
+    setResolutionNotice(null)
+  }
+
+  async function handleTaskResult(payload: TaskResultCreate) {
+    if (!goalId || !selectedTask || resolutionInFlight.current) return
+
+    resolutionInFlight.current = true
+    setIsResolving(true)
+    setResolutionError(null)
+    setResolutionNotice(null)
+
+    try {
+      const result = await resolveTask(selectedTask.id, payload)
+
+      try {
+        const refreshedPlan = await getGoalPlan(goalId)
+        setPlan(refreshedPlan)
+        setSelectedTask(null)
+        setResolutionNotice({
+          kind: 'success',
+          message:
+            result.xp_awarded > 0
+              ? `Tarea completada. +${result.xp_awarded} XP`
+              : 'Resultado registrado. El plan ya está actualizado.',
+        })
+      } catch {
+        setResolutionError(
+          'El resultado se guardó, pero no pudimos actualizar el plan. Volvé a intentarlo.',
+        )
+      }
+    } catch (cause) {
+      if (isTaskAlreadyResolvedError(cause)) {
+        try {
+          setPlan(await getGoalPlan(goalId))
+          setSelectedTask(null)
+          setResolutionNotice({
+            kind: 'info',
+            message: 'La tarea ya tenía otro resultado. Actualizamos el plan con su estado real.',
+          })
+        } catch {
+          setResolutionError(
+            'La tarea ya fue resuelta y no pudimos actualizar el plan. Recargá la página.',
+          )
+        }
+      } else {
+        setResolutionError(getTaskResolutionError(cause))
+      }
+    } finally {
+      resolutionInFlight.current = false
+      setIsResolving(false)
+    }
+  }
 
   if (isLoading) {
     return (
@@ -121,6 +193,13 @@ export function ActivePlanPage() {
         </div>
       </section>
 
+      {resolutionNotice && (
+        <div className={`plan-notice plan-notice--${resolutionNotice.kind}`} role="status">
+          <span aria-hidden="true">{resolutionNotice.kind === 'success' ? '✓' : 'i'}</span>
+          <p>{resolutionNotice.message}</p>
+        </div>
+      )}
+
       <div className="plan-preview-heading">
         <div>
           <p className="eyebrow">Objetivo → Etapas → Misiones → Tareas</p>
@@ -128,7 +207,23 @@ export function ActivePlanPage() {
         </div>
       </div>
 
-      <PlanHierarchy preview={plan} />
+      <ActivePlanHierarchy
+        stages={plan.stages}
+        selectedTaskId={selectedTask?.id ?? null}
+        onSelectTask={selectTask}
+        renderResolutionPanel={(task) => (
+          <TaskResolutionPanel
+            task={task}
+            isSubmitting={isResolving}
+            error={resolutionError}
+            onCancel={() => {
+              setSelectedTask(null)
+              setResolutionError(null)
+            }}
+            onSubmit={handleTaskResult}
+          />
+        )}
+      />
     </AppShell>
   )
 }

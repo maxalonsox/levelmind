@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { acceptGoalPlan } from '../api/goals'
-import type { PlanPreview } from '../types/planning'
+import { resolveTask } from '../api/tasks'
+import type { PlanPreview, TaskResultCreate } from '../types/planning'
 import { apiRequest } from './api'
 import { supabase } from './supabase'
 
@@ -96,6 +97,24 @@ describe('apiRequest', () => {
     expect(url).toBe('http://api.test/goals/goal-id/plan/accept')
     expect(request?.method).toBe('POST')
     expect(request?.body).toBe(JSON.stringify(reviewedPreview))
+    expect(new Headers(request?.headers).get('Authorization')).toBe(
+      'Bearer supabase-access-token',
+    )
+  })
+
+  it('posts an authenticated task result to the existing execution endpoint', async () => {
+    const payload: TaskResultCreate = {
+      result: 'completed',
+      difficulty_feedback: 'difficult',
+      feedback_text: 'Necesité más tiempo del esperado.',
+    }
+
+    await resolveTask('task/id', payload)
+
+    const [url, request] = vi.mocked(fetch).mock.calls[0]!
+    expect(url).toBe('http://api.test/tasks/task%2Fid/result')
+    expect(request?.method).toBe('POST')
+    expect(request?.body).toBe(JSON.stringify(payload))
     expect(new Headers(request?.headers).get('Authorization')).toBe(
       'Bearer supabase-access-token',
     )
