@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.adaptation_accept import router as adaptation_accept_router
 from app.api.adaptation_preview import router as adaptation_preview_router
+from app.api.adaptation_reject import router as adaptation_reject_router
 from app.api.evaluation_preview import router as evaluation_preview_router
 from app.api.goals import router as goals_router
 from app.api.goal_plan import router as goal_plan_router
@@ -43,3 +44,4 @@ app.include_router(goal_plan_router)
 app.include_router(evaluation_preview_router)
 app.include_router(adaptation_preview_router)
 app.include_router(adaptation_accept_router)
+app.include_router(adaptation_reject_router)

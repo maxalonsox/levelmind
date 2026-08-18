@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -32,3 +33,9 @@ class AdaptationAcceptResponse(BaseModel):
     revision_id: UUID
     revision_number: int = Field(gt=0)
     applied_change_count: int = Field(gt=0)
+
+
+class AdaptationRejectResponse(BaseModel):
+    adaptation_id: UUID
+    status: Literal[AdaptationStatus.REJECTED]
+    reviewed_at: datetime
