@@ -204,15 +204,15 @@ def insufficient_data_result(context: EvaluationContext) -> EvaluationResult:
     return EvaluationResult(
         status=EvaluationStatus.INSUFFICIENT_DATA,
         summary=(
-            f"Only {resolved} of {total} Tasks have terminal results, which is "
-            "not enough evidence to evaluate the plan responsibly yet."
+            f"Todavía hay poca evidencia: {resolved} de {total} tareas tienen "
+            "un resultado registrado."
         ),
         signals=[
             EvaluationSignal(
                 type=EvaluationSignalType.INSUFFICIENT_DATA,
                 description=(
-                    f"{resolved} of {total} Tasks are resolved; this is below "
-                    "the minimum absolute or proportional evidence threshold."
+                    f"Hay {resolved} de {total} tareas resueltas; necesitamos "
+                    "algunas más para evaluar el plan."
                 ),
                 severity=EvaluationSeverity.LOW,
             )

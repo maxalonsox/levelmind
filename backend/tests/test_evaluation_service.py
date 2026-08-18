@@ -155,6 +155,11 @@ def test_evaluation_prompt_requires_conservative_non_mutating_analysis() -> None
     assert "do not diagnose emotions, health, psychology" in prompt
     assert "factual historical evidence" in prompt
     assert "not a declared preference" in prompt
+    assert "in spanish" in prompt
+    assert "one or two short, direct sentences" in prompt
+    assert "never mention internal status or contract names" in prompt
+    assert "insufficient_data" in prompt
+    assert "do not provide chain-of-thought" in prompt
     assert "return only a json object" in prompt
 
     user_prompt = build_evaluation_prompt(evaluation_context()).user

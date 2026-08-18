@@ -1,14 +1,20 @@
 import asyncio
+import logging
 from typing import Any
 from uuid import UUID, uuid4
 
+import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient, Response
+from openai import RateLimitError
 from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 
 from app.ai.adaptation.contracts import AdaptationContext
-from app.ai.adaptation.errors import AdaptationProviderTimeoutError
+from app.ai.adaptation.errors import (
+    AdaptationProviderAPIError,
+    AdaptationProviderTimeoutError,
+)
 from app.ai.orchestration.adaptive_reasoning import (
     AdaptiveReasoningOrchestrator,
 )
@@ -237,22 +243,25 @@ def test_adaptation_preview_persists_validated_pending_proposal_without_mutation
 ) -> None:
     goal = persist_goal(db_session, authenticated_user_id)
     tasks = persist_plan(db_session, goal)
-    db_session.add(
-        MemoryEntry(
-            user_id=authenticated_user_id,
-            goal_id=goal.id,
-            memory_type="observed",
-            key="task_execution",
-            value={
-                "result": "completed",
-                "estimated_difficulty": "normal",
-                "difficulty_feedback": "difficult",
-                "feedback_text": "Must not enter either LLM context.",
-            },
-            source_type="task",
-            source_id=tasks[0].id,
-            confidence=1,
-        )
+    db_session.add_all(
+        [
+            MemoryEntry(
+                user_id=authenticated_user_id,
+                goal_id=goal.id,
+                memory_type="observed",
+                key="task_execution",
+                value={
+                    "result": "completed",
+                    "estimated_difficulty": "normal",
+                    "difficulty_feedback": "difficult",
+                    "feedback_text": "Must not enter either LLM context.",
+                },
+                source_type="task",
+                source_id=uuid4(),
+                confidence=1,
+            )
+            for _ in range(15)
+        ]
     )
     db_session.commit()
     evaluator = FakeEvaluationProvider(
@@ -301,7 +310,7 @@ def test_adaptation_preview_persists_validated_pending_proposal_without_mutation
         adapter.contexts[0].recent_observed_task_execution_history
     )
     assert adaptation_memory == evaluation_memory
-    assert len(adaptation_memory) == 1
+    assert len(adaptation_memory) == 10
     context_text = str(adapter.contexts[0].model_dump(mode="json"))
     assert str(goal.id) not in context_text
     assert str(goal.user_id) not in context_text
@@ -457,9 +466,52 @@ def test_adaptation_preview_maps_invalid_target_to_502(
     )
 
 
+def test_adaptation_preview_exposes_only_safe_rate_limit_detail(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    goal = persist_goal(db_session, authenticated_user_id)
+    persist_plan(db_session, goal)
+    request = httpx.Request(
+        "POST", "https://provider.example/v1/chat/completions"
+    )
+    response = httpx.Response(429, request=request)
+    provider_error = RateLimitError(
+        "secret provider response",
+        response=response,
+        body={"secret": "must not leak"},
+    )
+    adaptation_error = AdaptationProviderAPIError(
+        "Adaptation provider is temporarily unavailable"
+    )
+    adaptation_error.__cause__ = provider_error
+    evaluator = FakeEvaluationProvider(
+        evaluation_result(needs_adaptation=True)
+    )
+    adapter = FakeAdaptationProvider(error=adaptation_error)
+    app.dependency_overrides[get_evaluation_provider_factory] = (
+        lambda: lambda: evaluator
+    )
+    app.dependency_overrides[get_adaptation_provider_factory] = (
+        lambda: lambda: adapter
+    )
+    try:
+        response = asyncio.run(post_adaptation(goal.id))
+    finally:
+        app.dependency_overrides.pop(get_evaluation_provider_factory, None)
+        app.dependency_overrides.pop(get_adaptation_provider_factory, None)
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "AI service rate limit exceeded"
+    }
+    assert "secret" not in response.text
+
+
 def test_adaptation_preview_does_not_persist_invalid_provider_response(
     db_session: Session,
     authenticated_user_id: UUID,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     goal = persist_goal(db_session, authenticated_user_id)
     persist_plan(db_session, goal)
@@ -481,7 +533,8 @@ def test_adaptation_preview_does_not_persist_invalid_provider_response(
         lambda: lambda: adapter
     )
     try:
-        response = asyncio.run(post_adaptation(goal.id))
+        with caplog.at_level(logging.WARNING):
+            response = asyncio.run(post_adaptation(goal.id))
     finally:
         app.dependency_overrides.pop(get_evaluation_provider_factory, None)
         app.dependency_overrides.pop(get_adaptation_provider_factory, None)
@@ -490,6 +543,17 @@ def test_adaptation_preview_does_not_persist_invalid_provider_response(
     assert response.json() == {
         "detail": "Adaptation provider returned an invalid response"
     }
+    record = next(
+        record
+        for record in caplog.records
+        if record.message == "Adaptation preview cognitive component failed"
+    )
+    assert record.component == "adaptation"
+    assert record.goal_id == str(goal.id)
+    assert record.error_type == "InvalidAdaptationProposalError"
+    assert record.validation_errors
+    assert "Invalid proposal" not in caplog.text
+    assert "The changes required by this decision are absent." not in caplog.text
     assert adapter.closed is True
     assert (
         db_session.scalar(
@@ -497,6 +561,47 @@ def test_adaptation_preview_does_not_persist_invalid_provider_response(
         )
         == 0
     )
+
+
+def test_adaptation_preview_logs_evaluation_contract_failure_separately(
+    db_session: Session,
+    authenticated_user_id: UUID,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    goal = persist_goal(db_session, authenticated_user_id)
+    persist_plan(db_session, goal)
+    evaluator = FakeEvaluationProvider(
+        {
+            "status": "unexpected_internal_status",
+            "summary": "Raw provider content must stay private.",
+            "signals": [],
+            "needs_adaptation": False,
+        }  # type: ignore[arg-type]
+    )
+    app.dependency_overrides[get_evaluation_provider_factory] = (
+        lambda: lambda: evaluator
+    )
+    try:
+        with caplog.at_level(logging.WARNING):
+            response = asyncio.run(post_adaptation(goal.id))
+    finally:
+        app.dependency_overrides.pop(get_evaluation_provider_factory, None)
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "Evaluation provider returned an invalid response"
+    }
+    record = next(
+        record
+        for record in caplog.records
+        if record.message == "Adaptation preview cognitive component failed"
+    )
+    assert record.component == "evaluation"
+    assert record.goal_id == str(goal.id)
+    assert record.error_type == "InvalidEvaluationResultError"
+    assert record.validation_errors
+    assert "unexpected_internal_status" not in caplog.text
+    assert "Raw provider content must stay private." not in caplog.text
 
 
 @pytest.mark.parametrize(

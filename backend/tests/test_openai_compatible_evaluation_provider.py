@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from collections.abc import Sequence
 from types import SimpleNamespace
 from typing import Any, cast
@@ -7,10 +8,13 @@ from typing import Any, cast
 import httpx
 import pytest
 from openai import (
+    APIConnectionError,
+    APIStatusError,
     APITimeoutError,
     AsyncOpenAI,
     AuthenticationError,
     BadRequestError,
+    RateLimitError,
 )
 
 from app.ai.evaluation.contracts import (
@@ -30,6 +34,7 @@ from app.ai.evaluation.errors import (
 from app.ai.evaluation.openai_compatible import (
     OpenAICompatibleEvaluationProvider,
 )
+from app.ai.openai_compatible import ai_provider_logging_context
 from app.core.config import Settings
 
 
@@ -169,51 +174,65 @@ def test_evaluation_provider_uses_structured_output_and_configured_model() -> No
     assert completions.parse_calls[0]["response_format"] is EvaluationResult
 
 
-def test_evaluation_provider_falls_back_to_json_object() -> None:
+def test_evaluation_provider_does_not_retry_bad_request() -> None:
     completions = StubCompletions(
         parse_results=[api_error(BadRequestError, 400)],
-        create_results=[
-            completion(content=json.dumps(valid_result_payload()))
-        ],
     )
 
-    result = asyncio.run(
-        provider_with(completions).evaluate(evaluation_context())
-    )
+    with pytest.raises(EvaluationProviderAPIError):
+        asyncio.run(
+            provider_with(completions).evaluate(evaluation_context())
+        )
 
-    assert isinstance(result, EvaluationResult)
-    assert completions.create_calls[0]["response_format"] == {
-        "type": "json_object"
-    }
+    assert len(completions.parse_calls) == 1
+    assert completions.create_calls == []
 
 
-def test_evaluation_provider_recovers_from_sdk_structured_parser_error() -> None:
+def test_evaluation_provider_does_not_retry_local_parser_error() -> None:
     completions = StubCompletions(
         parse_results=[TypeError("'NoneType' object is not iterable")],
-        create_results=[
-            completion(content=json.dumps(valid_result_payload()))
-        ],
     )
 
-    result = asyncio.run(
-        provider_with(completions).evaluate(evaluation_context())
-    )
+    with pytest.raises(InvalidEvaluationResultError):
+        asyncio.run(
+            provider_with(completions).evaluate(evaluation_context())
+        )
 
-    assert isinstance(result, EvaluationResult)
     assert len(completions.parse_calls) == 1
-    assert len(completions.create_calls) == 1
-    assert completions.create_calls[0]["response_format"] == {
-        "type": "json_object"
-    }
+    assert completions.create_calls == []
 
 
-def test_evaluation_provider_falls_back_to_plain_json() -> None:
+def test_evaluation_provider_does_not_retry_not_found() -> None:
     completions = StubCompletions(
-        parse_results=[api_error(BadRequestError, 400)],
-        create_results=[
-            api_error(BadRequestError, 400),
-            completion(content=json.dumps(valid_result_payload())),
-        ],
+        parse_results=[api_error(APIStatusError, 404)],
+    )
+
+    with pytest.raises(EvaluationProviderAPIError):
+        asyncio.run(
+            provider_with(completions).evaluate(evaluation_context())
+        )
+
+    assert len(completions.parse_calls) == 1
+    assert completions.create_calls == []
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        APIConnectionError(
+            message="connection reset",
+            request=httpx.Request(
+                "POST", "https://provider.example/v1/chat/completions"
+            ),
+        ),
+        api_error(RateLimitError, 429),
+        api_error(APIStatusError, 500),
+        api_error(APIStatusError, 503),
+    ],
+)
+def test_evaluation_provider_retries_only_transient_errors(error: Exception) -> None:
+    completions = StubCompletions(
+        parse_results=[error, completion(parsed=valid_result_payload())]
     )
 
     result = asyncio.run(
@@ -221,8 +240,8 @@ def test_evaluation_provider_falls_back_to_plain_json() -> None:
     )
 
     assert isinstance(result, EvaluationResult)
-    assert len(completions.parse_calls) + len(completions.create_calls) == 3
-    assert "response_format" not in completions.create_calls[1]
+    assert len(completions.parse_calls) == 2
+    assert completions.create_calls == []
 
 
 def test_evaluation_provider_retries_timeout_and_stops() -> None:
@@ -255,6 +274,8 @@ def test_evaluation_provider_transforms_api_error() -> None:
             provider_with(completions).evaluate(evaluation_context())
         )
 
+    assert len(completions.parse_calls) == 1
+
 
 def test_evaluation_provider_rejects_invalid_json() -> None:
     completions = StubCompletions(
@@ -265,6 +286,8 @@ def test_evaluation_provider_rejects_invalid_json() -> None:
         asyncio.run(
             provider_with(completions).evaluate(evaluation_context())
         )
+
+    assert len(completions.parse_calls) == 1
 
 
 def test_evaluation_provider_rejects_invalid_result() -> None:
@@ -288,3 +311,37 @@ def test_evaluation_provider_rejects_invalid_result() -> None:
         asyncio.run(
             provider_with(completions).evaluate(evaluation_context())
         )
+
+    assert len(completions.parse_calls) == 1
+
+
+def test_evaluation_retry_log_is_correlated_and_sanitized(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    error = api_error(APIStatusError, 503)
+    error.args = ("secret-token provider body",)
+    completions = StubCompletions(
+        parse_results=[error, completion(parsed=valid_result_payload())]
+    )
+
+    with caplog.at_level(logging.WARNING), ai_provider_logging_context(
+        "safe-goal-id"
+    ):
+        asyncio.run(
+            provider_with(completions).evaluate(evaluation_context())
+        )
+
+    record = next(
+        record
+        for record in caplog.records
+        if record.getMessage().startswith("Evaluation provider retry:")
+    )
+    assert record.ai_component == "evaluation"
+    assert record.goal_id == "safe-goal-id"
+    assert record.category == "provider_5xx"
+    assert record.error_type == "APIStatusError"
+    assert record.status_code == 503
+    assert record.attempt == 1
+    assert record.max_attempts == 3
+    assert record.ai_model == "configured-provider-model"
+    assert "secret-token" not in caplog.text

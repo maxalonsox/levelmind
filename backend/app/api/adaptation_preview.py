@@ -1,7 +1,9 @@
+import logging
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.ai.adaptation.contracts import (
@@ -17,6 +19,11 @@ from app.ai.adaptation.openai_compatible import (
 )
 from app.ai.orchestration.adaptive_reasoning import (
     AdaptiveReasoningOrchestrator,
+)
+from app.ai.openai_compatible import (
+    AI_RATE_LIMIT_DETAIL,
+    ai_provider_logging_context,
+    is_rate_limit_error,
 )
 from app.ai.errors import AIConfigurationError
 from app.ai.evaluation.contracts import EvaluationContext, EvaluationResult
@@ -47,6 +54,7 @@ from app.services.plan_adaptation import (
 from app.services.plan_revision import ensure_current_plan_revision
 
 router = APIRouter(prefix="/goals", tags=["adaptation"])
+logger = logging.getLogger(__name__)
 
 
 def get_adaptation_provider_factory() -> AdaptationProviderFactory:
@@ -104,10 +112,11 @@ async def preview_goal_adaptation(
         build_adaptation_context=adaptation_context_builder,
     )
     try:
-        graph_result = await orchestrator.run(
-            user_id=current_user.id,
-            goal_id=goal_id,
-        )
+        with ai_provider_logging_context(str(goal_id)):
+            graph_result = await orchestrator.run(
+                user_id=current_user.id,
+                goal_id=goal_id,
+            )
         evaluation = graph_result["evaluation"]
         proposal = graph_result.get("adaptation") or build_no_change_proposal(
             evaluation
@@ -146,17 +155,60 @@ async def preview_goal_adaptation(
             detail="Adaptation provider timed out",
         ) from exc
     except EvaluationError as exc:
+        _log_cognitive_failure(goal_id, "evaluation", exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Evaluation provider returned an invalid response",
+            detail=(
+                AI_RATE_LIMIT_DETAIL
+                if is_rate_limit_error(exc)
+                else "Evaluation provider returned an invalid response"
+            ),
         ) from exc
     except AdaptationError as exc:
+        _log_cognitive_failure(goal_id, "adaptation", exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Adaptation provider returned an invalid response",
+            detail=(
+                AI_RATE_LIMIT_DETAIL
+                if is_rate_limit_error(exc)
+                else "Adaptation provider returned an invalid response"
+            ),
         ) from exc
     except PlanRevisionConflictError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Plan changed while the adaptation was generated",
         ) from exc
+
+
+def _log_cognitive_failure(
+    goal_id: UUID,
+    component: str,
+    error: Exception,
+) -> None:
+    extra: dict[str, object] = {
+        "goal_id": str(goal_id),
+        "component": component,
+        "error_type": type(error).__name__,
+        "error_message": str(error),
+    }
+    validation_errors = _validation_errors(error)
+    if validation_errors:
+        extra["validation_errors"] = validation_errors
+    logger.warning("Adaptation preview cognitive component failed", extra=extra)
+
+
+def _validation_errors(error: Exception) -> list[dict[str, object]]:
+    current: BaseException | None = error
+    while current is not None:
+        if isinstance(current, ValidationError):
+            return [
+                {
+                    "type": detail["type"],
+                    "location": [str(part) for part in detail["loc"]],
+                    "message": detail["msg"],
+                }
+                for detail in current.errors(include_url=False)
+            ]
+        current = current.__cause__
+    return []

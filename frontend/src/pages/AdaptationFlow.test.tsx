@@ -325,6 +325,29 @@ describe('adaptation HITL flow', () => {
     expect(screen.queryByRole('button', { name: 'Mantener plan actual' })).not.toBeInTheDocument()
   })
 
+  it('replaces technical insufficient-data content with a concise user-facing fallback', async () => {
+    apiMocks.previewGoalAdaptation.mockResolvedValue({
+      ...noChangePreview,
+      summary: 'The current evidence does not justify changing the plan.',
+      rationale: 'The evaluation status is insufficient_data.',
+      needs_adaptation: false,
+    })
+    renderFlow()
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByRole('button', { name: 'Revisar mi plan' }))
+
+    expect(
+      await screen.findAllByText('Todavía necesitamos un poco más de información'),
+    ).toHaveLength(2)
+    expect(
+      screen.getByText(
+        'Completá algunas tareas más y LevelMind volverá a evaluar si conviene ajustar tu plan.',
+      ),
+    ).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('insufficient_data')
+  })
+
   it('renders every supported change in human language and no raw JSON', async () => {
     const user = userEvent.setup()
     await openProposal(user)
@@ -348,6 +371,7 @@ describe('adaptation HITL flow', () => {
     expect(screen.getByText('Dificultad propuesta: Fácil')).toBeInTheDocument()
     expect(screen.getByText('Nueva duración estimada: 90 min')).toBeInTheDocument()
     expect(screen.getByText('Tu plan todavía no cambió.')).toBeInTheDocument()
+    expect(screen.getAllByText('¿Por qué este cambio?')).toHaveLength(6)
     expect(document.body.textContent).not.toContain('"type":"add_task"')
     expect(document.body.textContent).not.toContain('revision-id')
     expect(document.body.textContent).not.toContain(adaptationId)
@@ -449,6 +473,39 @@ describe('adaptation HITL flow', () => {
     expect(await screen.findByText(message)).toBeInTheDocument()
     expect(screen.getByText('Implement endpoint')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Revisar mi plan' })).toBeEnabled()
+  })
+
+  it('shows a specific safe message when adaptation preview exhausts rate-limit retries', async () => {
+    apiMocks.previewGoalAdaptation.mockRejectedValue(
+      new ApiError('AI service rate limit exceeded', 502),
+    )
+    renderFlow()
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByRole('button', { name: 'Revisar mi plan' }))
+
+    expect(
+      await screen.findByText(
+        'El servicio de IA está recibiendo demasiadas solicitudes. Esperá unos segundos e intentá nuevamente.',
+      ),
+    ).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('OpenRouter')
+    expect(document.body.textContent).not.toContain('429')
+    expect(screen.getByText('Implement endpoint')).toBeInTheDocument()
+  })
+
+  it('keeps the generic fallback for other adaptation preview 502 errors', async () => {
+    apiMocks.previewGoalAdaptation.mockRejectedValue(
+      new ApiError('Adaptation provider returned an invalid response', 502),
+    )
+    renderFlow()
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByRole('button', { name: 'Revisar mi plan' }))
+
+    expect(
+      await screen.findByText('No pudimos interpretar la evaluación. Podés intentarlo nuevamente.'),
+    ).toBeInTheDocument()
   })
 
   it('does not create another preview when the review route is refreshed without state', () => {

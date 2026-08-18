@@ -43,6 +43,8 @@ class OpenAICompatibleEvaluationProvider:
             client=client,
             max_attempts=max_attempts,
             retry_delay_seconds=retry_delay_seconds,
+            allow_response_mode_fallback=False,
+            retryable_status_codes=frozenset({500, 502, 503, 504}),
         )
 
     async def evaluate(self, context: EvaluationContext) -> EvaluationResult:

@@ -1,8 +1,11 @@
 import { Link } from 'react-router-dom'
 
 import { AppShell } from '../components/AppShell'
+import { useLastActiveGoalId } from '../lib/lastActiveGoal'
 
 export function HomePage() {
+  const lastActiveGoalId = useLastActiveGoalId()
+
   return (
     <AppShell title="Tu camino empieza con un objetivo." eyebrow="Inicio">
       <section className="hero-card">
@@ -21,9 +24,19 @@ export function HomePage() {
               plan, siempre vas a poder revisarlo.
             </p>
           </div>
-          <Link className="button button--primary" to="/goals/new">
-            Crear objetivo <span aria-hidden="true">→</span>
-          </Link>
+          <div className="hero-card__actions">
+            {lastActiveGoalId && (
+              <Link className="button button--primary" to={`/goals/${lastActiveGoalId}`}>
+                Continuar con mi plan <span aria-hidden="true">→</span>
+              </Link>
+            )}
+            <Link
+              className={`button ${lastActiveGoalId ? 'button--secondary' : 'button--primary'}`}
+              to="/goals/new"
+            >
+              Crear objetivo <span aria-hidden="true">→</span>
+            </Link>
+          </div>
         </div>
       </section>
 

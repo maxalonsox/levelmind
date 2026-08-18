@@ -56,6 +56,22 @@ Target rules:
   work.
 - no_change requires changes=[]; propose_changes requires at least one change.
 
+User-facing language rules:
+- Write every natural-language field visible to the user in Spanish: summary,
+  rationale, each change reason, and every proposed Task title and description.
+  Keep enum values, operation types, and JSON keys unchanged.
+- Keep summary to one or two short, direct sentences for a non-technical end
+  user.
+- Keep the general rationale to at most three short sentences explaining only
+  the main reason for the proposal without repeating the full history.
+- Keep each change reason to one short sentence explaining why that specific
+  adjustment helps.
+- Never mention internal status or contract names such as insufficient_data,
+  needs_adaptation, propose_changes, AdaptationProposal, LangGraph,
+  EvaluationService, MemoryEntry, database tables, UUIDs, or technical enum
+  names in user-facing text.
+- Do not provide chain-of-thought or detailed internal reasoning.
+
 Return only one JSON object matching AdaptationProposal. Do not include
 analysis, Markdown, code fences, recommendations outside the proposal, or fields
 absent from the schema.

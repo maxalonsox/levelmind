@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
 from time import monotonic
@@ -22,6 +24,33 @@ from app.core.config import Settings
 logger = logging.getLogger(__name__)
 
 OutputModel = TypeVar("OutputModel", bound=BaseModel)
+AI_RATE_LIMIT_DETAIL = "AI service rate limit exceeded"
+_goal_id_context: ContextVar[str | None] = ContextVar(
+    "ai_provider_goal_id", default=None
+)
+
+
+@contextmanager
+def ai_provider_logging_context(goal_id: str):
+    token = _goal_id_context.set(goal_id)
+    try:
+        yield
+    finally:
+        _goal_id_context.reset(token)
+
+
+def is_rate_limit_error(error: BaseException) -> bool:
+    current: BaseException | None = error
+    while current is not None:
+        if isinstance(current, RateLimitError):
+            return True
+        if (
+            isinstance(current, APIStatusError)
+            and current.status_code == 429
+        ):
+            return True
+        current = current.__cause__
+    return False
 
 
 class _ResponseMode(StrEnum):
@@ -57,6 +86,8 @@ class OpenAICompatibleStructuredClient(Generic[OutputModel]):
         client: AsyncOpenAI | None = None,
         max_attempts: int = 3,
         retry_delay_seconds: float = 0.25,
+        allow_response_mode_fallback: bool = True,
+        retryable_status_codes: frozenset[int] | None = None,
     ) -> None:
         missing = []
         api_key = (
@@ -92,6 +123,8 @@ class OpenAICompatibleStructuredClient(Generic[OutputModel]):
         self._errors = errors
         self._max_attempts = max_attempts
         self._retry_delay_seconds = retry_delay_seconds
+        self._allow_response_mode_fallback = allow_response_mode_fallback
+        self._retryable_status_codes = retryable_status_codes
 
     async def generate(
         self, messages: list[dict[str, str]]
@@ -108,6 +141,12 @@ class OpenAICompatibleStructuredClient(Generic[OutputModel]):
             try:
                 result = await self._request(messages, mode)
             except _StructuredOutputCompatibilityError as exc:
+                if not self._allow_response_mode_fallback:
+                    invalid_output = self._errors.invalid_output(
+                        self._invalid_output_message
+                    )
+                    self._log_failure(attempt, invalid_output)
+                    raise invalid_output from exc
                 fallback_mode = self._next_mode(mode)
                 logger.warning(
                     "%s structured output mode failed; using fallback",
@@ -124,28 +163,31 @@ class OpenAICompatibleStructuredClient(Generic[OutputModel]):
                 mode = fallback_mode
                 continue
             except APITimeoutError as exc:
-                if await self._retry_transient(attempt, exc):
+                if await self._retry_transient(attempt, exc, "timeout"):
                     continue
                 self._log_failure(attempt, exc)
                 raise self._errors.timeout(
                     f"{self._operation} provider timed out"
                 ) from exc
             except RateLimitError as exc:
-                if await self._retry_transient(attempt, exc):
+                if await self._retry_transient(attempt, exc, "rate_limit"):
                     continue
                 self._log_failure(attempt, exc)
                 raise self._errors.api(
                     f"{self._operation} provider is temporarily unavailable"
                 ) from exc
             except APIConnectionError as exc:
-                if await self._retry_transient(attempt, exc):
+                if await self._retry_transient(attempt, exc, "connection"):
                     continue
                 self._log_failure(attempt, exc)
                 raise self._errors.api(
                     f"{self._operation} provider connection failed"
                 ) from exc
             except APIStatusError as exc:
-                if self._supports_fallback(exc, mode):
+                if (
+                    self._allow_response_mode_fallback
+                    and self._supports_fallback(exc, mode)
+                ):
                     fallback_mode = self._next_mode(mode)
                     logger.warning(
                         "%s response mode unsupported; using fallback",
@@ -160,8 +202,11 @@ class OpenAICompatibleStructuredClient(Generic[OutputModel]):
                     )
                     mode = fallback_mode
                     continue
-                if exc.status_code >= 500 and await self._retry_transient(
-                    attempt, exc
+                retry_category = self._retry_category_for_status(
+                    exc.status_code
+                )
+                if retry_category and await self._retry_transient(
+                    attempt, exc, retry_category
                 ):
                     continue
                 self._log_failure(attempt, exc)
@@ -279,17 +324,30 @@ class OpenAICompatibleStructuredClient(Generic[OutputModel]):
             f"{self._contract_name}"
         )
 
-    async def _retry_transient(self, attempt: int, exc: Exception) -> bool:
+    async def _retry_transient(
+        self,
+        attempt: int,
+        exc: Exception,
+        category: str,
+    ) -> bool:
         if attempt >= self._max_attempts:
             return False
+        details = self._log_details(attempt, exc, category)
         logger.warning(
-            "Retrying transient %s provider error",
+            "%s provider retry: component=%s goal_id=%s category=%s "
+            "error_type=%s status_code=%s attempt=%s/%s model=%s "
+            "request_id=%s",
+            self._operation,
             self._operation.lower(),
-            extra={
-                "ai_model": self._model,
-                "attempt": attempt,
-                "error_type": type(exc).__name__,
-            },
+            details["goal_id"],
+            category,
+            details["error_type"],
+            details["status_code"],
+            attempt,
+            self._max_attempts,
+            self._model,
+            details["request_id"],
+            extra=details,
         )
         await asyncio.sleep(self._retry_delay_seconds * (2 ** (attempt - 1)))
         return True
@@ -303,6 +361,17 @@ class OpenAICompatibleStructuredClient(Generic[OutputModel]):
             422,
         }
 
+    def _retry_category_for_status(self, status_code: int) -> str | None:
+        if status_code == 429:
+            return "rate_limit"
+        if self._retryable_status_codes is None:
+            is_retryable = status_code >= 500
+        else:
+            is_retryable = status_code in self._retryable_status_codes
+        if is_retryable:
+            return "provider_5xx"
+        return None
+
     @staticmethod
     def _next_mode(mode: _ResponseMode) -> _ResponseMode:
         if mode is _ResponseMode.STRUCTURED:
@@ -310,12 +379,62 @@ class OpenAICompatibleStructuredClient(Generic[OutputModel]):
         return _ResponseMode.PLAIN_JSON
 
     def _log_failure(self, attempt: int, exc: Exception) -> None:
+        category = self._error_category(exc)
+        details = self._log_details(attempt, exc, category)
         logger.warning(
-            "%s generation failed",
+            "%s generation failed: component=%s goal_id=%s category=%s "
+            "error_type=%s status_code=%s attempts=%s/%s model=%s "
+            "request_id=%s",
             self._operation,
-            extra={
-                "ai_model": self._model,
-                "attempts": attempt,
-                "error_type": type(exc).__name__,
-            },
+            self._operation.lower(),
+            details["goal_id"],
+            category,
+            details["error_type"],
+            details["status_code"],
+            attempt,
+            self._max_attempts,
+            self._model,
+            details["request_id"],
+            extra=details,
         )
+
+    def _log_details(
+        self,
+        attempt: int,
+        exc: Exception,
+        category: str,
+    ) -> dict[str, object]:
+        return {
+            "ai_component": self._operation.lower(),
+            "goal_id": _goal_id_context.get() or "unavailable",
+            "category": category,
+            "error_type": type(exc).__name__,
+            "status_code": getattr(exc, "status_code", None),
+            "attempt": attempt,
+            "max_attempts": self._max_attempts,
+            "ai_model": self._model,
+            "request_id": getattr(exc, "request_id", None),
+        }
+
+    def _error_category(self, exc: Exception) -> str:
+        if isinstance(exc, APITimeoutError):
+            return "timeout"
+        if isinstance(exc, RateLimitError):
+            return "rate_limit"
+        if isinstance(exc, APIConnectionError):
+            return "connection"
+        if isinstance(exc, APIStatusError):
+            return (
+                self._retry_category_for_status(exc.status_code)
+                or "invalid_response"
+            )
+        if isinstance(
+            exc,
+            (
+                self._errors.empty,
+                self._errors.invalid_json,
+                self._errors.invalid_output,
+            ),
+        ):
+            return "invalid_response"
+        return "unknown"

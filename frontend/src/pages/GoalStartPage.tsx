@@ -239,7 +239,7 @@ export function GoalStartPage() {
               <span>3</span>
               <div>
                 <strong>Tu decisión</strong>
-                <p>La aceptación del plan llegará en el próximo slice.</p>
+                <p>Después vas a revisar la propuesta y decidir si querés aceptar el plan.</p>
               </div>
             </li>
           </ol>

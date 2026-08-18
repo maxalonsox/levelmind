@@ -136,18 +136,19 @@ export function AdaptationReviewPage() {
   }
 
   if (!adaptation) {
+    const presentation = getNoChangePresentation(preview)
     return (
       <AppShell
         eyebrow="Revisión del plan"
-        title="Tu plan sigue funcionando bien"
+        title={presentation.pageTitle}
         description="La revisión terminó y no propone modificaciones en este momento."
       >
         <section className="adaptation-result-card adaptation-result-card--no-change">
           <span className="adaptation-result-card__icon" aria-hidden="true">✓</span>
           <div>
             <p className="eyebrow">Sin cambios necesarios</p>
-            <h2>{preview.summary}</h2>
-            <p>{preview.rationale}</p>
+            <h2>{presentation.title}</h2>
+            <p>{presentation.description}</p>
           </div>
         </section>
         <Link className="button button--primary" to={`/goals/${goalId}`} state={{ activePlan: plan, goal }}>
@@ -225,4 +226,49 @@ function getAdaptationRouteState(state: unknown, goalId: string | undefined): Ad
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+function getNoChangePresentation(preview: AdaptationPreviewResponse) {
+  const content = `${preview.summary} ${preview.rationale}`.toLowerCase()
+  const insufficientEvidence = [
+    'insufficient_data',
+    'insufficient evidence',
+    'not enough evidence',
+    'poca evidencia',
+    'evidencia insuficiente',
+  ].some((marker) => content.includes(marker))
+
+  if (insufficientEvidence) {
+    return {
+      pageTitle: 'Todavía necesitamos un poco más de información',
+      title: 'Todavía necesitamos un poco más de información',
+      description:
+        'Completá algunas tareas más y LevelMind volverá a evaluar si conviene ajustar tu plan.',
+    }
+  }
+
+  const technicalContent = [
+    'needs_adaptation',
+    'propose_changes',
+    'evaluationresult',
+    'adaptationproposal',
+    'langgraph',
+    'evaluationservice',
+    'memoryentry',
+  ].some((marker) => content.includes(marker))
+
+  if (technicalContent) {
+    return {
+      pageTitle: 'Tu plan sigue funcionando bien',
+      title: 'Tu plan sigue funcionando bien',
+      description:
+        'Por ahora no vemos motivos suficientes para modificarlo. Podés seguir avanzando con el plan actual.',
+    }
+  }
+
+  return {
+    pageTitle: 'Tu plan sigue funcionando bien',
+    title: preview.summary,
+    description: preview.rationale,
+  }
 }

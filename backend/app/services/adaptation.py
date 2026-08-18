@@ -20,7 +20,7 @@ from app.ai.adaptation.errors import (
     InvalidAdaptationProposalError,
     InvalidAdaptationTargetError,
 )
-from app.ai.evaluation.contracts import EvaluationResult
+from app.ai.evaluation.contracts import EvaluationResult, EvaluationStatus
 
 logger = logging.getLogger(__name__)
 
@@ -87,13 +87,17 @@ class AdaptationService:
 def build_no_change_proposal(
     evaluation: EvaluationResult,
 ) -> AdaptationProposal:
+    if evaluation.status is EvaluationStatus.INSUFFICIENT_DATA:
+        return AdaptationProposal(
+            decision=AdaptationDecision.NO_CHANGE,
+            summary="Todavía hay poca evidencia para revisar tu plan.",
+            rationale="Completá algunas tareas más y volveremos a evaluarlo.",
+            changes=[],
+        )
     return AdaptationProposal(
         decision=AdaptationDecision.NO_CHANGE,
-        summary="The current evidence does not justify changing the plan.",
-        rationale=(
-            f"The evaluation status is {evaluation.status.value} and its "
-            "validated result does not require adaptation."
-        ),
+        summary="Por ahora no hace falta cambiar tu plan.",
+        rationale="Podés seguir avanzando y volver a revisarlo cuando haya más resultados.",
         changes=[],
     )
 

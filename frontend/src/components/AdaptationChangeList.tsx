@@ -28,7 +28,10 @@ export function AdaptationChangeList({ changes }: { changes: AdaptationChange[] 
             </div>
           </header>
           <ChangeDetails change={change} />
-          <p className="adaptation-change__reason">{change.reason}</p>
+          <div className="adaptation-change__reason">
+            <span>¿Por qué este cambio?</span>
+            <p>{change.reason}</p>
+          </div>
         </li>
       ))}
     </ol>

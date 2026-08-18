@@ -45,6 +45,10 @@ export function getActivePlanError(error: unknown): string {
   return 'No pudimos cargar el plan activo. Intentá nuevamente.'
 }
 
+export function isActivePlanNotFoundError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404
+}
+
 export function isTaskAlreadyResolvedError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 409
 }
@@ -66,6 +70,9 @@ export function getAdaptationPreviewError(error: unknown): string {
     if (error.status === 404) return 'No encontramos el plan que querés revisar.'
     if (error.status === 409) return 'El plan cambió mientras se evaluaba. Podés intentarlo nuevamente.'
     if (error.status === 422) return 'No pudimos identificar el plan que querés revisar.'
+    if (error.status === 502 && error.message === 'AI service rate limit exceeded') {
+      return 'El servicio de IA está recibiendo demasiadas solicitudes. Esperá unos segundos e intentá nuevamente.'
+    }
     if (error.status === 502) return 'No pudimos interpretar la evaluación. Podés intentarlo nuevamente.'
     if (error.status === 503) return 'El servicio de IA no está disponible en este momento.'
     if (error.status === 504) return 'La evaluación tardó demasiado. Podés intentar nuevamente.'

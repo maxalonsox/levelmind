@@ -15,4 +15,11 @@ def test_adaptation_prompt_requires_minimal_evidence_based_changes() -> None:
     assert "never use uuids" in prompt
     assert "factual historical evidence" in prompt
     assert "not a declared preference" in prompt
+    assert "in spanish" in prompt
+    assert "one or two short, direct sentences" in prompt
+    assert "at most three short sentences" in prompt
+    assert "each change reason to one short sentence" in prompt
+    assert "never mention internal status or contract names" in prompt
+    assert "insufficient_data" in prompt
+    assert "do not provide chain-of-thought" in prompt
     assert "return only one json object" in prompt

@@ -13,8 +13,10 @@ import {
   getActivePlanError,
   getAdaptationPreviewError,
   getTaskResolutionError,
+  isActivePlanNotFoundError,
   isTaskAlreadyResolvedError,
 } from '../lib/userFacingError'
+import { clearLastActiveGoalId, setLastActiveGoalId } from '../lib/lastActiveGoal'
 import type { Goal } from '../types/goals'
 import type { GoalPlan, PersistedTask, TaskResultCreate } from '../types/planning'
 
@@ -33,6 +35,7 @@ export function ActivePlanPage() {
   const [plan, setPlan] = useState<GoalPlan | null>(routePlan)
   const [isLoading, setIsLoading] = useState(routePlan === null)
   const [error, setError] = useState<string | null>(null)
+  const [planNotFound, setPlanNotFound] = useState(false)
   const [isEvaluating, setIsEvaluating] = useState(false)
   const [adaptationError, setAdaptationError] = useState<string | null>(null)
   const [selectedTask, setSelectedTask] = useState<PersistedTask | null>(null)
@@ -47,9 +50,14 @@ export function ActivePlanPage() {
 
     setIsLoading(true)
     setError(null)
+    setPlanNotFound(false)
     try {
       setPlan(await getGoalPlan(goalId))
     } catch (cause) {
+      if (isActivePlanNotFoundError(cause)) {
+        clearLastActiveGoalId()
+        setPlanNotFound(true)
+      }
       setError(getActivePlanError(cause))
     } finally {
       setIsLoading(false)
@@ -65,7 +73,13 @@ export function ActivePlanPage() {
         if (isActive) setPlan(activePlan)
       })
       .catch((cause: unknown) => {
-        if (isActive) setError(getActivePlanError(cause))
+        if (isActive) {
+          if (isActivePlanNotFoundError(cause)) {
+            clearLastActiveGoalId()
+            setPlanNotFound(true)
+          }
+          setError(getActivePlanError(cause))
+        }
       })
       .finally(() => {
         if (isActive) setIsLoading(false)
@@ -75,6 +89,10 @@ export function ActivePlanPage() {
       isActive = false
     }
   }, [goalId, routePlan])
+
+  useEffect(() => {
+    if (goalId && plan) setLastActiveGoalId(goalId)
+  }, [goalId, plan])
 
   async function reviewPlan() {
     if (!goalId || !plan || evaluationInFlight.current) return
@@ -164,9 +182,16 @@ export function ActivePlanPage() {
       <AppShell eyebrow="Plan activo" title="No pudimos mostrar tu plan.">
         <section className="request-state-card">
           <Alert>{error ?? 'No encontramos información para este plan.'}</Alert>
-          <button className="button button--primary" onClick={() => void retryPlan()}>
-            Reintentar
-          </button>
+          {planNotFound ? (
+            <div className="request-state-card__actions">
+              <Link className="button button--primary" to="/">Volver al inicio</Link>
+              <Link className="button button--secondary" to="/goals/new">Crear objetivo</Link>
+            </div>
+          ) : (
+            <button className="button button--primary" onClick={() => void retryPlan()}>
+              Reintentar
+            </button>
+          )}
         </section>
       </AppShell>
     )

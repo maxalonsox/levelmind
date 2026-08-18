@@ -17,7 +17,7 @@ from app.ai.adaptation.errors import (
 )
 from app.ai.adaptation.prompts import build_adaptation_prompt
 from app.ai.evaluation.contracts import EvaluationGoalContext, EvaluationResult
-from app.services.adaptation import AdaptationService
+from app.services.adaptation import AdaptationService, build_no_change_proposal
 
 
 def evaluation(*, needs_adaptation: bool) -> EvaluationResult:
@@ -136,6 +136,27 @@ def test_adaptation_service_short_circuits_without_provider() -> None:
     assert result.decision is AdaptationDecision.NO_CHANGE
     assert result.changes == []
     assert factory_calls == 0
+
+
+def test_insufficient_data_no_change_is_concise_and_hides_internal_status() -> None:
+    result = build_no_change_proposal(
+        EvaluationResult(
+            status="insufficient_data",
+            summary="Internal evaluation summary.",
+            signals=[
+                {
+                    "type": "insufficient_data",
+                    "description": "Internal signal.",
+                    "severity": "low",
+                }
+            ],
+            needs_adaptation=False,
+        )
+    )
+
+    content = f"{result.summary} {result.rationale}"
+    assert "poca evidencia" in content
+    assert "insufficient_data" not in content
 
 
 def test_adaptation_service_validates_and_returns_provider_proposal() -> None:

@@ -108,7 +108,7 @@ export function LoginPage() {
             )}
           </button>
 
-          <p className="auth-card__footnote">El registro se habilitará en un próximo slice.</p>
+          <p className="auth-card__footnote">Ingresá con tu cuenta de LevelMind para continuar.</p>
         </form>
       </section>
     </main>

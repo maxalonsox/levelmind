@@ -13,6 +13,11 @@ from app.ai.evaluation.errors import (
 from app.ai.evaluation.openai_compatible import (
     OpenAICompatibleEvaluationProvider,
 )
+from app.ai.openai_compatible import (
+    AI_RATE_LIMIT_DETAIL,
+    ai_provider_logging_context,
+    is_rate_limit_error,
+)
 from app.auth import AuthenticatedUser, get_current_user
 from app.core.config import get_settings
 from app.db.session import get_db
@@ -44,7 +49,8 @@ async def preview_goal_evaluation(
 ) -> EvaluationResult:
     context = build_evaluation_context(db, goal_id, current_user.id)
     try:
-        return await EvaluationService(provider_factory).evaluate(context)
+        with ai_provider_logging_context(str(goal_id)):
+            return await EvaluationService(provider_factory).evaluate(context)
     except AIConfigurationError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -58,5 +64,9 @@ async def preview_goal_evaluation(
     except EvaluationError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Evaluation provider returned an invalid response",
+            detail=(
+                AI_RATE_LIMIT_DETAIL
+                if is_rate_limit_error(exc)
+                else "Evaluation provider returned an invalid response"
+            ),
         ) from exc
