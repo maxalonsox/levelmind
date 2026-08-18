@@ -4,7 +4,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.ai.adaptation.contracts import AdaptationDecision
+from app.ai.adaptation.contracts import (
+    AdaptationContext,
+    AdaptationDecision,
+)
 from app.ai.adaptation.errors import (
     AdaptationError,
     AdaptationProviderTimeoutError,
@@ -12,7 +15,11 @@ from app.ai.adaptation.errors import (
 from app.ai.adaptation.openai_compatible import (
     OpenAICompatibleAdaptationProvider,
 )
+from app.ai.orchestration.adaptive_reasoning import (
+    AdaptiveReasoningOrchestrator,
+)
 from app.ai.errors import AIConfigurationError
+from app.ai.evaluation.contracts import EvaluationContext, EvaluationResult
 from app.ai.evaluation.errors import (
     EvaluationError,
     EvaluationProviderTimeoutError,
@@ -25,6 +32,7 @@ from app.schemas.adaptation import AdaptationPreviewResponse
 from app.services.adaptation import (
     AdaptationProviderFactory,
     AdaptationService,
+    build_no_change_proposal,
 )
 from app.services.adaptation_context import build_adaptation_context
 from app.services.evaluation import (
@@ -62,43 +70,60 @@ async def preview_goal_adaptation(
         Depends(get_adaptation_provider_factory),
     ],
 ) -> AdaptationPreviewResponse:
-    evaluation_context = build_evaluation_context(
-        db, goal_id, current_user.id
-    )
-    try:
-        evaluation = await EvaluationService(
-            evaluation_provider_factory
-        ).evaluate(evaluation_context)
-        adaptation_service = AdaptationService(adaptation_provider_factory)
-        if not evaluation.needs_adaptation:
-            proposal = await adaptation_service.propose(evaluation)
-            return AdaptationPreviewResponse(
-                **proposal.model_dump(),
-                needs_adaptation=evaluation.needs_adaptation,
-                adaptation=None,
-            )
+    base_revision_id: UUID | None = None
 
+    def evaluation_context_builder(
+        requested_goal_id: UUID,
+        user_id: UUID,
+    ) -> EvaluationContext:
+        return build_evaluation_context(db, requested_goal_id, user_id)
+
+    def adaptation_context_builder(
+        requested_goal_id: UUID,
+        user_id: UUID,
+        evaluation_context: EvaluationContext,
+        evaluation: EvaluationResult,
+    ) -> AdaptationContext:
+        nonlocal base_revision_id
         base_revision = ensure_current_plan_revision(
-            db, goal_id, current_user.id
+            db, requested_goal_id, user_id
         )
-        adaptation_context = build_adaptation_context(
+        base_revision_id = base_revision.id
+        return build_adaptation_context(
             db,
-            goal_id,
-            current_user.id,
+            requested_goal_id,
+            user_id,
             evaluation_context,
             evaluation,
         )
-        proposal = await adaptation_service.propose(
-            evaluation, adaptation_context
+
+    orchestrator = AdaptiveReasoningOrchestrator(
+        evaluation_service=EvaluationService(evaluation_provider_factory),
+        adaptation_service=AdaptationService(adaptation_provider_factory),
+        build_evaluation_context=evaluation_context_builder,
+        build_adaptation_context=adaptation_context_builder,
+    )
+    try:
+        graph_result = await orchestrator.run(
+            user_id=current_user.id,
+            goal_id=goal_id,
+        )
+        evaluation = graph_result["evaluation"]
+        proposal = graph_result.get("adaptation") or build_no_change_proposal(
+            evaluation
         )
         adaptation = None
         if proposal.decision is AdaptationDecision.PROPOSE_CHANGES:
+            if base_revision_id is None:
+                raise RuntimeError(
+                    "Adaptation ran without a base Plan revision"
+                )
             adaptation = persist_plan_adaptation(
                 db,
                 goal_id,
                 current_user.id,
                 proposal,
-                base_revision.id,
+                base_revision_id,
             )
         return AdaptationPreviewResponse(
             **proposal.model_dump(),

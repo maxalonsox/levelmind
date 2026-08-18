@@ -48,7 +48,7 @@ class AdaptationService:
                 "Adaptation preview completed deterministically",
                 extra={"llm_invoked": False, "decision": "no_change"},
             )
-            return _no_change_proposal(evaluation)
+            return build_no_change_proposal(evaluation)
         if context is None:
             raise ValueError(
                 "AdaptationContext is required when adaptation is needed"
@@ -84,7 +84,9 @@ class AdaptationService:
         return proposal
 
 
-def _no_change_proposal(evaluation: EvaluationResult) -> AdaptationProposal:
+def build_no_change_proposal(
+    evaluation: EvaluationResult,
+) -> AdaptationProposal:
     return AdaptationProposal(
         decision=AdaptationDecision.NO_CHANGE,
         summary="The current evidence does not justify changing the plan.",

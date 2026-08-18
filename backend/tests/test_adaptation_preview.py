@@ -4,13 +4,17 @@ from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient, Response
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 
 from app.ai.adaptation.contracts import AdaptationContext
 from app.ai.adaptation.errors import AdaptationProviderTimeoutError
+from app.ai.orchestration.adaptive_reasoning import (
+    AdaptiveReasoningOrchestrator,
+)
 from app.ai.errors import AIConfigurationError
 from app.ai.evaluation.contracts import EvaluationContext, EvaluationResult
+from app.ai.evaluation.errors import EvaluationProviderTimeoutError
 from app.api.adaptation_preview import get_adaptation_provider_factory
 from app.api.evaluation_preview import get_evaluation_provider_factory
 from app.main import app
@@ -123,16 +127,25 @@ def no_change_proposal() -> dict[str, Any]:
 
 
 class FakeEvaluationProvider:
-    def __init__(self, result: EvaluationResult) -> None:
+    def __init__(
+        self,
+        result: EvaluationResult | None = None,
+        error: Exception | None = None,
+    ) -> None:
         self.result = result
+        self.error = error
         self.contexts: list[EvaluationContext] = []
+        self.closed = False
 
     async def evaluate(self, context: EvaluationContext) -> EvaluationResult:
         self.contexts.append(context)
+        if self.error is not None:
+            raise self.error
+        assert self.result is not None
         return self.result
 
     async def close(self) -> None:
-        pass
+        self.closed = True
 
 
 class FakeAdaptationProvider:
@@ -155,6 +168,7 @@ class FakeAdaptationProvider:
 def test_adaptation_preview_short_circuits_without_adaptation_provider(
     db_session: Session,
     authenticated_user_id: UUID,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     goal = persist_goal(db_session, authenticated_user_id)
     persist_plan(db_session, goal)
@@ -162,6 +176,24 @@ def test_adaptation_preview_short_circuits_without_adaptation_provider(
         evaluation_result(needs_adaptation=False)
     )
     adaptation_factory_calls = 0
+    orchestrator_run_calls = 0
+    original_run = AdaptiveReasoningOrchestrator.run
+
+    async def tracked_run(
+        orchestrator: AdaptiveReasoningOrchestrator,
+        *,
+        user_id: UUID,
+        goal_id: UUID,
+    ):
+        nonlocal orchestrator_run_calls
+        orchestrator_run_calls += 1
+        return await original_run(
+            orchestrator,
+            user_id=user_id,
+            goal_id=goal_id,
+        )
+
+    monkeypatch.setattr(AdaptiveReasoningOrchestrator, "run", tracked_run)
 
     def fail_if_constructed() -> FakeAdaptationProvider:
         nonlocal adaptation_factory_calls
@@ -185,12 +217,17 @@ def test_adaptation_preview_short_circuits_without_adaptation_provider(
     assert response.json()["decision"] == "no_change"
     assert response.json()["changes"] == []
     assert response.json()["adaptation"] is None
+    assert orchestrator_run_calls == 1
+    assert len(evaluator.contexts) == 1
     assert adaptation_factory_calls == 0
     assert (
         db_session.scalar(
             select(func.count()).select_from(PlanAdaptation)
         )
         == 0
+    )
+    assert (
+        db_session.scalar(select(func.count()).select_from(PlanRevision)) == 0
     )
 
 
@@ -272,6 +309,12 @@ def test_adaptation_preview_persists_validated_pending_proposal_without_mutation
     db_session.expire_all()
     persisted_adaptation = db_session.scalar(select(PlanAdaptation))
     assert persisted_adaptation is not None
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(PlanAdaptation)
+        )
+        == 1
+    )
     assert str(persisted_adaptation.id) == payload["adaptation"]["id"]
     assert persisted_adaptation.goal_id == goal.id
     assert persisted_adaptation.base_revision_id == UUID(
@@ -284,6 +327,9 @@ def test_adaptation_preview_persists_validated_pending_proposal_without_mutation
     assert base_revision is not None
     assert base_revision.id == persisted_adaptation.base_revision_id
     assert base_revision.revision_number == 1
+    assert (
+        db_session.scalar(select(func.count()).select_from(PlanRevision)) == 1
+    )
     assert (
         db_session.scalar(select(func.count()).select_from(Stage)),
         db_session.scalar(select(func.count()).select_from(Mission)),
@@ -331,6 +377,9 @@ def test_adaptation_preview_does_not_persist_provider_no_change_proposal(
             select(func.count()).select_from(PlanAdaptation)
         )
         == 0
+    )
+    assert (
+        db_session.scalar(select(func.count()).select_from(PlanRevision)) == 1
     )
 
 
@@ -493,3 +542,101 @@ def test_adaptation_preview_maps_adaptation_errors(
 
     assert response.status_code == expected_status
     assert response.json() == {"detail": expected_detail}
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(PlanAdaptation)
+        )
+        == 0
+    )
+    assert (
+        db_session.scalar(select(func.count()).select_from(PlanRevision)) == 1
+    )
+
+
+def test_adaptation_preview_evaluation_error_does_not_persist(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    goal = persist_goal(db_session, authenticated_user_id)
+    persist_plan(db_session, goal)
+    evaluator = FakeEvaluationProvider(
+        error=EvaluationProviderTimeoutError("internal timeout")
+    )
+    adaptation_factory_calls = 0
+
+    def fail_if_constructed() -> FakeAdaptationProvider:
+        nonlocal adaptation_factory_calls
+        adaptation_factory_calls += 1
+        raise AssertionError("Adaptation provider must not be constructed")
+
+    app.dependency_overrides[get_evaluation_provider_factory] = (
+        lambda: lambda: evaluator
+    )
+    app.dependency_overrides[get_adaptation_provider_factory] = (
+        lambda: fail_if_constructed
+    )
+    try:
+        response = asyncio.run(post_adaptation(goal.id))
+    finally:
+        app.dependency_overrides.pop(get_evaluation_provider_factory, None)
+        app.dependency_overrides.pop(get_adaptation_provider_factory, None)
+
+    assert response.status_code == 504
+    assert response.json() == {"detail": "Evaluation provider timed out"}
+    assert len(evaluator.contexts) == 1
+    assert evaluator.closed is True
+    assert adaptation_factory_calls == 0
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(PlanAdaptation)
+        )
+        == 0
+    )
+    assert (
+        db_session.scalar(select(func.count()).select_from(PlanRevision)) == 0
+    )
+
+
+def test_adaptation_preview_rolls_back_failed_pending_persistence(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    goal = persist_goal(db_session, authenticated_user_id)
+    persist_plan(db_session, goal)
+    evaluator = FakeEvaluationProvider(
+        evaluation_result(needs_adaptation=True)
+    )
+    adapter = FakeAdaptationProvider(proposal())
+
+    def fail_insert(_mapper, _connection, _target: PlanAdaptation) -> None:
+        raise RuntimeError("Deliberate PlanAdaptation persistence failure")
+
+    app.dependency_overrides[get_evaluation_provider_factory] = (
+        lambda: lambda: evaluator
+    )
+    app.dependency_overrides[get_adaptation_provider_factory] = (
+        lambda: lambda: adapter
+    )
+    event.listen(PlanAdaptation, "before_insert", fail_insert)
+    try:
+        with pytest.raises(
+            RuntimeError,
+            match="Deliberate PlanAdaptation persistence failure",
+        ):
+            asyncio.run(post_adaptation(goal.id))
+    finally:
+        event.remove(PlanAdaptation, "before_insert", fail_insert)
+        app.dependency_overrides.pop(get_evaluation_provider_factory, None)
+        app.dependency_overrides.pop(get_adaptation_provider_factory, None)
+
+    assert len(evaluator.contexts) == 1
+    assert len(adapter.contexts) == 1
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(PlanAdaptation)
+        )
+        == 0
+    )
+    assert (
+        db_session.scalar(select(func.count()).select_from(PlanRevision)) == 1
+    )
