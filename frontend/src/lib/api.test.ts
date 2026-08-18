@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { acceptGoalPlan } from '../api/goals'
+import { acceptAdaptation, previewGoalAdaptation, rejectAdaptation } from '../api/adaptations'
 import { resolveTask } from '../api/tasks'
 import type { PlanPreview, TaskResultCreate } from '../types/planning'
 import { apiRequest } from './api'
@@ -115,6 +116,30 @@ describe('apiRequest', () => {
     expect(url).toBe('http://api.test/tasks/task%2Fid/result')
     expect(request?.method).toBe('POST')
     expect(request?.body).toBe(JSON.stringify(payload))
+    expect(new Headers(request?.headers).get('Authorization')).toBe(
+      'Bearer supabase-access-token',
+    )
+  })
+
+  it.each([
+    ['preview', () => previewGoalAdaptation('goal/id'), 'http://api.test/goals/goal%2Fid/adaptation/preview'],
+    [
+      'accept',
+      () => acceptAdaptation('goal/id', 'adaptation/id'),
+      'http://api.test/goals/goal%2Fid/adaptations/adaptation%2Fid/accept',
+    ],
+    [
+      'reject',
+      () => rejectAdaptation('goal/id', 'adaptation/id'),
+      'http://api.test/goals/goal%2Fid/adaptations/adaptation%2Fid/reject',
+    ],
+  ])('posts authenticated adaptation %s requests to the existing endpoint', async (_name, requestCall, expectedUrl) => {
+    await requestCall()
+
+    const [url, request] = vi.mocked(fetch).mock.calls[0]!
+    expect(url).toBe(expectedUrl)
+    expect(request?.method).toBe('POST')
+    expect(request?.body).toBeUndefined()
     expect(new Headers(request?.headers).get('Authorization')).toBe(
       'Bearer supabase-access-token',
     )

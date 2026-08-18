@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useLocation, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 
+import { previewGoalAdaptation } from '../api/adaptations'
 import { getGoalPlan } from '../api/goals'
 import { resolveTask } from '../api/tasks'
 import { ActivePlanHierarchy } from '../components/ActivePlanHierarchy'
@@ -10,6 +11,7 @@ import { LoadingState } from '../components/LoadingState'
 import { TaskResolutionPanel } from '../components/TaskResolutionPanel'
 import {
   getActivePlanError,
+  getAdaptationPreviewError,
   getTaskResolutionError,
   isTaskAlreadyResolvedError,
 } from '../lib/userFacingError'
@@ -24,15 +26,21 @@ interface ResolutionNotice {
 export function ActivePlanPage() {
   const { goalId } = useParams()
   const location = useLocation()
+  const navigate = useNavigate()
   const goal = getRouteGoal(location.state, goalId)
-  const [plan, setPlan] = useState<GoalPlan | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const routePlan = getRoutePlan(location.state, goalId)
+  const adaptationNotice = getRouteAdaptationNotice(location.state)
+  const [plan, setPlan] = useState<GoalPlan | null>(routePlan)
+  const [isLoading, setIsLoading] = useState(routePlan === null)
   const [error, setError] = useState<string | null>(null)
+  const [isEvaluating, setIsEvaluating] = useState(false)
+  const [adaptationError, setAdaptationError] = useState<string | null>(null)
   const [selectedTask, setSelectedTask] = useState<PersistedTask | null>(null)
   const [isResolving, setIsResolving] = useState(false)
   const [resolutionError, setResolutionError] = useState<string | null>(null)
   const [resolutionNotice, setResolutionNotice] = useState<ResolutionNotice | null>(null)
   const resolutionInFlight = useRef(false)
+  const evaluationInFlight = useRef(false)
 
   async function retryPlan() {
     if (!goalId) return
@@ -49,7 +57,7 @@ export function ActivePlanPage() {
   }
 
   useEffect(() => {
-    if (!goalId) return
+    if (!goalId || routePlan) return
 
     let isActive = true
     void getGoalPlan(goalId)
@@ -66,7 +74,26 @@ export function ActivePlanPage() {
     return () => {
       isActive = false
     }
-  }, [goalId])
+  }, [goalId, routePlan])
+
+  async function reviewPlan() {
+    if (!goalId || !plan || evaluationInFlight.current) return
+    evaluationInFlight.current = true
+    setIsEvaluating(true)
+    setAdaptationError(null)
+
+    try {
+      const preview = await previewGoalAdaptation(goalId)
+      navigate(`/goals/${goalId}/adaptation`, {
+        state: { preview, plan, goal },
+      })
+    } catch (cause) {
+      setAdaptationError(getAdaptationPreviewError(cause))
+    } finally {
+      evaluationInFlight.current = false
+      setIsEvaluating(false)
+    }
+  }
 
   function selectTask(task: PersistedTask) {
     setSelectedTask(task)
@@ -200,6 +227,30 @@ export function ActivePlanPage() {
         </div>
       )}
 
+      {adaptationNotice && (
+        <div className="plan-notice plan-notice--success" role="status">
+          <span aria-hidden="true">✓</span>
+          <p>{adaptationNotice}</p>
+        </div>
+      )}
+
+      <section className="adaptation-entry-card">
+        <div>
+          <p className="eyebrow">Plan adaptable</p>
+          <h2>¿Querés revisar cómo viene funcionando?</h2>
+          <p>LevelMind puede evaluar tu progreso reciente y sugerir ajustes si hacen falta.</p>
+          {adaptationError && <Alert>{adaptationError}</Alert>}
+        </div>
+        <button
+          className="button button--secondary adaptation-entry-card__action"
+          type="button"
+          disabled={isEvaluating}
+          onClick={() => void reviewPlan()}
+        >
+          {isEvaluating ? 'LevelMind está evaluando tu progreso reciente…' : 'Revisar mi plan'}
+        </button>
+      </section>
+
       <div className="plan-preview-heading">
         <div>
           <p className="eyebrow">Objetivo → Etapas → Misiones → Tareas</p>
@@ -244,4 +295,21 @@ function getRouteGoal(state: unknown, goalId: string | undefined): Goal | null {
   }
 
   return candidate as Goal
+}
+
+function getRoutePlan(state: unknown, goalId: string | undefined): GoalPlan | null {
+  if (typeof state !== 'object' || state === null || !('activePlan' in state)) return null
+  const candidate = state.activePlan
+  if (
+    typeof candidate !== 'object' ||
+    candidate === null ||
+    !('goal_id' in candidate) ||
+    candidate.goal_id !== goalId
+  ) return null
+  return candidate as GoalPlan
+}
+
+function getRouteAdaptationNotice(state: unknown): string | null {
+  if (typeof state !== 'object' || state === null || !('adaptationNotice' in state)) return null
+  return typeof state.adaptationNotice === 'string' ? state.adaptationNotice : null
 }
