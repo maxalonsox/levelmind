@@ -1,5 +1,41 @@
 import { ApiError } from './api'
 
+export function getLoginError(error: unknown): string {
+  const code = getStringProperty(error, 'code')
+  const name = getStringProperty(error, 'name')
+  const message = error instanceof Error ? error.message.toLowerCase() : ''
+  const status = getNumberProperty(error, 'status')
+
+  if (
+    code === 'invalid_credentials' ||
+    code === 'user_not_found' ||
+    message.includes('invalid login credentials') ||
+    message.includes('invalid credentials') ||
+    message.includes('user not found')
+  ) {
+    return 'Email o contraseña incorrectos. Revisá tus datos e intentá nuevamente.'
+  }
+  if (code === 'email_address_invalid' || message.includes('email address is invalid')) {
+    return 'Ingresá un email válido.'
+  }
+  if (code === 'email_not_confirmed' || message.includes('email not confirmed')) {
+    return 'Tu email todavía no fue verificado. Revisá tu correo antes de iniciar sesión.'
+  }
+  if (
+    status === 429 ||
+    code === 'over_request_rate_limit' ||
+    message.includes('rate limit') ||
+    message.includes('too many requests')
+  ) {
+    return 'Hay demasiados intentos en este momento. Esperá unos segundos e intentá nuevamente.'
+  }
+  if (name === 'AuthRetryableFetchError') {
+    return 'No pudimos conectarnos. Revisá tu conexión e intentá nuevamente.'
+  }
+
+  return 'No pudimos iniciar sesión. Intentá nuevamente.'
+}
+
 export function getRegistrationError(error: unknown): string {
   const message = error instanceof Error ? error.message.toLowerCase() : ''
   const status =
@@ -20,6 +56,20 @@ export function getRegistrationError(error: unknown): string {
     return 'Hay demasiados intentos en este momento. Esperá unos segundos e intentá nuevamente.'
   }
   return 'No pudimos crear tu cuenta. Intentá nuevamente.'
+}
+
+function getStringProperty(value: unknown, property: string): string | undefined {
+  if (typeof value !== 'object' || value === null || !(property in value)) return undefined
+  return typeof value[property as keyof typeof value] === 'string'
+    ? value[property as keyof typeof value]
+    : undefined
+}
+
+function getNumberProperty(value: unknown, property: string): number | undefined {
+  if (typeof value !== 'object' || value === null || !(property in value)) return undefined
+  return typeof value[property as keyof typeof value] === 'number'
+    ? value[property as keyof typeof value]
+    : undefined
 }
 
 export function getGoalCreationError(error: unknown): string {

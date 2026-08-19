@@ -98,6 +98,9 @@ describe('registration with Supabase Auth', () => {
     expect(supabaseMocks.signUp).toHaveBeenCalledWith({
       email: 'new@example.com',
       password: 'secret1',
+      options: {
+        emailRedirectTo: `${window.location.origin}/login`,
+      },
     })
     expect(screen.getByRole('button', { name: 'Creando cuenta…' })).toBeDisabled()
     finish({ data: { session: null, user: { id: 'user-id' } }, error: null })

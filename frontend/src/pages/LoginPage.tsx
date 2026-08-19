@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext'
 import { Alert } from '../components/Alert'
 import { Brand } from '../components/Brand'
 import { LoadingState } from '../components/LoadingState'
+import { getLoginError } from '../lib/userFacingError'
 
 export function LoginPage() {
   const { isLoading: isAuthLoading, session, signIn } = useAuth()
@@ -34,7 +35,7 @@ export function LoginPage() {
       await signIn(email.trim(), password)
       navigate(destination, { replace: true })
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Revisá tus datos e intentá nuevamente.')
+      setError(getLoginError(cause))
     } finally {
       setIsSubmitting(false)
     }
