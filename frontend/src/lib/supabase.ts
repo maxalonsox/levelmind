@@ -6,6 +6,6 @@ export const supabase = createClient(env.supabaseUrl, env.supabasePublishableKey
   auth: {
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: false,
+    detectSessionInUrl: true,
   },
 })
