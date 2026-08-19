@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -235,6 +236,77 @@ def test_adaptation_preview_short_circuits_without_adaptation_provider(
     assert (
         db_session.scalar(select(func.count()).select_from(PlanRevision)) == 0
     )
+
+
+def test_adaptation_preview_does_not_reuse_evidence_before_accepted_revision(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    old_time = datetime(2026, 8, 1, 12, tzinfo=UTC)
+    cutoff = old_time + timedelta(days=1)
+    goal = persist_goal(db_session, authenticated_user_id)
+    tasks = persist_plan(db_session, goal)
+    for task in tasks[:3]:
+        task.resolved_at = old_time
+    base_revision = PlanRevision(
+        goal_id=goal.id,
+        revision_number=1,
+        snapshot={"stages": []},
+        created_at=old_time,
+    )
+    db_session.add(base_revision)
+    db_session.commit()
+    accepted_adaptation = PlanAdaptation(
+        goal_id=goal.id,
+        base_revision_id=base_revision.id,
+        proposal=proposal(),
+        status="accepted",
+        reviewed_at=cutoff,
+    )
+    db_session.add(accepted_adaptation)
+    db_session.commit()
+    db_session.add(
+        PlanRevision(
+            goal_id=goal.id,
+            revision_number=2,
+            snapshot={"stages": []},
+            base_revision_id=base_revision.id,
+            adaptation_id=accepted_adaptation.id,
+            created_at=cutoff,
+        )
+    )
+    db_session.commit()
+    evaluation_factory_calls = 0
+    adaptation_factory_calls = 0
+
+    def fail_evaluation_factory() -> FakeEvaluationProvider:
+        nonlocal evaluation_factory_calls
+        evaluation_factory_calls += 1
+        raise AssertionError("Old evidence must not invoke Evaluation")
+
+    def fail_adaptation_factory() -> FakeAdaptationProvider:
+        nonlocal adaptation_factory_calls
+        adaptation_factory_calls += 1
+        raise AssertionError("Adaptation Planner must not be invoked")
+
+    app.dependency_overrides[get_evaluation_provider_factory] = (
+        lambda: fail_evaluation_factory
+    )
+    app.dependency_overrides[get_adaptation_provider_factory] = (
+        lambda: fail_adaptation_factory
+    )
+    try:
+        response = asyncio.run(post_adaptation(goal.id))
+    finally:
+        app.dependency_overrides.pop(get_evaluation_provider_factory, None)
+        app.dependency_overrides.pop(get_adaptation_provider_factory, None)
+
+    assert response.status_code == 200
+    assert response.json()["needs_adaptation"] is False
+    assert response.json()["decision"] == "no_change"
+    assert response.json()["adaptation"] is None
+    assert evaluation_factory_calls == 0
+    assert adaptation_factory_calls == 0
 
 
 def test_adaptation_preview_persists_validated_pending_proposal_without_mutation(

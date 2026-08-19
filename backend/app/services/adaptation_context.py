@@ -56,7 +56,9 @@ def build_adaptation_context(
             )
         ],
         recent_observed_task_execution_history=(
-            evaluation_context.recent_observed_task_execution_history
+            evaluation_context.adaptation_evidence.recent_observed_task_execution_history
+            if evaluation_context.adaptation_evidence is not None
+            else evaluation_context.recent_observed_task_execution_history
         ),
     )
 
@@ -121,15 +123,26 @@ def _select_relevant_tasks(
     evaluation_context: EvaluationContext,
     evaluation: EvaluationResult,
 ) -> list[_TaskLocation]:
+    evidence = evaluation_context.adaptation_evidence
+    deterministic_signals = (
+        evidence.deterministic_signals
+        if evidence is not None
+        else evaluation_context.deterministic_signals
+    )
+    mission_summaries = (
+        evidence.missions
+        if evidence is not None
+        else evaluation_context.missions
+    )
     signal_types = {
         signal.type
         for signal in (
-            evaluation_context.deterministic_signals + evaluation.signals
+            deterministic_signals + evaluation.signals
         )
     }
     difficult_missions = {
         (mission.stage_title, mission.title)
-        for mission in evaluation_context.missions
+        for mission in mission_summaries
         if mission.difficult_feedback_count >= 2
     }
     skipped_mission_ids = {

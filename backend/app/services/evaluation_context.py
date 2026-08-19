@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -6,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.ai.evaluation.contracts import (
     EvaluationContext,
+    EvaluationEvidenceWindow,
     EvaluationFeedbackMetrics,
     EvaluationFeedbackSample,
     EvaluationGoalContext,
@@ -25,6 +27,9 @@ from app.models.stage import Stage
 from app.models.task import Task
 from app.services.goal import get_owned_goal
 from app.services.memory_entry import list_recent_task_execution_memories
+from app.services.plan_revision import (
+    get_latest_applied_adaptation_revision,
+)
 
 
 def build_evaluation_context(
@@ -43,6 +48,7 @@ def build_evaluation_context(
     )
 
     tasks: list[Task] = []
+    mission_tasks_by_location: list[tuple[str, Mission, list[Task]]] = []
     mission_summaries: list[EvaluationMissionSummary] = []
     feedback_samples: list[EvaluationFeedbackSample] = []
 
@@ -54,6 +60,9 @@ def build_evaluation_context(
                 mission.tasks, key=lambda item: item.order_index
             )
             tasks.extend(mission_tasks)
+            mission_tasks_by_location.append(
+                (stage.title, mission, mission_tasks)
+            )
             mission_summaries.append(
                 _mission_summary(stage.title, mission, mission_tasks)
             )
@@ -139,6 +148,80 @@ def build_evaluation_context(
             max(resolved_timestamps) if resolved_timestamps else None
         ),
     )
+    applied_revision = get_latest_applied_adaptation_revision(db, goal_id)
+    adaptation_evidence = None
+    if applied_revision is not None:
+        eligible_terminal_ids = set(
+            db.scalars(
+                select(Task.id)
+                .join(Mission, Task.mission_id == Mission.id)
+                .join(Stage, Mission.stage_id == Stage.id)
+                .where(
+                    Stage.goal_id == goal_id,
+                    Task.status.in_(
+                        [
+                            PlanningStatus.COMPLETED,
+                            PlanningStatus.SKIPPED,
+                        ]
+                    ),
+                    Task.resolved_at > applied_revision.created_at,
+                )
+            )
+        )
+        eligible_tasks = [
+            task
+            for task in tasks
+            if not _is_terminal(task) or task.id in eligible_terminal_ids
+        ]
+        eligible_terminal_tasks = [
+            task for task in tasks if task.id in eligible_terminal_ids
+        ]
+        eligible_metrics = _metrics(
+            eligible_tasks, eligible_terminal_tasks
+        )
+        eligible_feedback_metrics = _feedback_metrics(
+            eligible_terminal_tasks
+        )
+        eligible_temporal_metrics = _temporal_metrics(
+            eligible_terminal_tasks
+        )
+        eligible_missions = [
+            _mission_summary(
+                stage_title,
+                mission,
+                [
+                    task
+                    for task in mission_tasks
+                    if not _is_terminal(task)
+                    or task.id in eligible_terminal_ids
+                ],
+            )
+            for stage_title, mission, mission_tasks in mission_tasks_by_location
+        ]
+        adaptation_evidence = EvaluationEvidenceWindow(
+            cutoff_at=applied_revision.created_at,
+            metrics=eligible_metrics,
+            feedback_metrics=eligible_feedback_metrics,
+            temporal_metrics=eligible_temporal_metrics,
+            missions=eligible_missions,
+            feedback_samples=_feedback_samples(
+                mission_tasks_by_location,
+                eligible_terminal_ids,
+            ),
+            deterministic_signals=_deterministic_signals(
+                eligible_metrics,
+                eligible_feedback_metrics,
+                eligible_missions,
+            ),
+            recent_observed_task_execution_history=(
+                _recent_task_execution_history(
+                    db,
+                    user_id,
+                    goal_id,
+                    created_after=applied_revision.created_at,
+                )
+            ),
+        )
 
     return EvaluationContext(
         goal=EvaluationGoalContext(
@@ -159,6 +242,7 @@ def build_evaluation_context(
         recent_observed_task_execution_history=(
             _recent_task_execution_history(db, user_id, goal_id)
         ),
+        adaptation_evidence=adaptation_evidence,
     )
 
 
@@ -166,10 +250,12 @@ def _recent_task_execution_history(
     db: Session,
     user_id: UUID,
     goal_id: UUID,
+    *,
+    created_after: datetime | None = None,
 ) -> list[RecentTaskExecutionObservation]:
     observations: list[RecentTaskExecutionObservation] = []
     for memory in list_recent_task_execution_memories(
-        db, user_id, goal_id
+        db, user_id, goal_id, created_after=created_after
     ):
         try:
             observations.append(
@@ -191,27 +277,36 @@ def _recent_task_execution_history(
 
 
 def has_insufficient_evidence(context: EvaluationContext) -> bool:
-    resolved = context.metrics.resolved_tasks
-    total = context.metrics.total_tasks
+    metrics = _decision_metrics(context)
+    resolved = metrics.resolved_tasks
+    total = metrics.total_tasks
     observed_percentage = resolved / total * 100 if total else 0.0
     return resolved < 2 or (resolved < 3 and observed_percentage < 20)
 
 
 def insufficient_data_result(context: EvaluationContext) -> EvaluationResult:
-    resolved = context.metrics.resolved_tasks
-    total = context.metrics.total_tasks
+    metrics = _decision_metrics(context)
+    resolved = metrics.resolved_tasks
+    total = metrics.total_tasks
+    evidence_scope = (
+        " desde la última actualización del plan"
+        if context.adaptation_evidence is not None
+        else ""
+    )
 
     return EvaluationResult(
         status=EvaluationStatus.INSUFFICIENT_DATA,
         summary=(
-            f"Todavía hay poca evidencia: {resolved} de {total} tareas tienen "
+            f"Todavía hay poca evidencia{evidence_scope}: {resolved} de "
+            f"{total} tareas tienen "
             "un resultado registrado."
         ),
         signals=[
             EvaluationSignal(
                 type=EvaluationSignalType.INSUFFICIENT_DATA,
                 description=(
-                    f"Hay {resolved} de {total} tareas resueltas; necesitamos "
+                    f"Hay {resolved} de {total} tareas resueltas"
+                    f"{evidence_scope}; necesitamos "
                     "algunas más para evaluar el plan."
                 ),
                 severity=EvaluationSeverity.LOW,
@@ -219,6 +314,107 @@ def insufficient_data_result(context: EvaluationContext) -> EvaluationResult:
         ],
         needs_adaptation=False,
     )
+
+
+def _decision_metrics(context: EvaluationContext) -> EvaluationMetrics:
+    if context.adaptation_evidence is not None:
+        return context.adaptation_evidence.metrics
+    return context.metrics
+
+
+def _metrics(
+    tasks: list[Task], terminal_tasks: list[Task]
+) -> EvaluationMetrics:
+    completed_tasks = sum(
+        PlanningStatus(task.status) is PlanningStatus.COMPLETED
+        for task in terminal_tasks
+    )
+    skipped_tasks = sum(
+        PlanningStatus(task.status) is PlanningStatus.SKIPPED
+        for task in terminal_tasks
+    )
+    total_tasks = len(tasks)
+    return EvaluationMetrics(
+        total_tasks=total_tasks,
+        completed_tasks=completed_tasks,
+        skipped_tasks=skipped_tasks,
+        pending_tasks=total_tasks - len(terminal_tasks),
+        resolved_tasks=len(terminal_tasks),
+        progress_percentage=(
+            round(completed_tasks / total_tasks * 100, 2)
+            if total_tasks
+            else 0.0
+        ),
+        xp_earned=sum(
+            task.xp_reward
+            for task in terminal_tasks
+            if PlanningStatus(task.status) is PlanningStatus.COMPLETED
+        ),
+    )
+
+
+def _feedback_metrics(
+    terminal_tasks: list[Task],
+) -> EvaluationFeedbackMetrics:
+    difficulty_values = [
+        Difficulty(task.difficulty_feedback)
+        for task in terminal_tasks
+        if task.difficulty_feedback is not None
+    ]
+    return EvaluationFeedbackMetrics(
+        tasks_with_difficulty_feedback=len(difficulty_values),
+        easy_count=difficulty_values.count(Difficulty.EASY),
+        normal_count=difficulty_values.count(Difficulty.NORMAL),
+        difficult_count=difficulty_values.count(Difficulty.DIFFICULT),
+        tasks_with_feedback_text=sum(
+            bool(task.feedback_text and task.feedback_text.strip())
+            for task in terminal_tasks
+        ),
+        tasks_without_explicit_feedback=sum(
+            task.difficulty_feedback is None
+            and not (task.feedback_text and task.feedback_text.strip())
+            for task in terminal_tasks
+        ),
+    )
+
+
+def _temporal_metrics(
+    terminal_tasks: list[Task],
+) -> EvaluationTemporalMetrics:
+    timestamps = [
+        task.resolved_at
+        for task in terminal_tasks
+        if task.resolved_at is not None
+    ]
+    return EvaluationTemporalMetrics(
+        resolved_tasks=len(terminal_tasks),
+        first_resolved_at=min(timestamps) if timestamps else None,
+        last_resolved_at=max(timestamps) if timestamps else None,
+    )
+
+
+def _feedback_samples(
+    mission_tasks_by_location: list[tuple[str, Mission, list[Task]]],
+    eligible_terminal_ids: set[UUID],
+) -> list[EvaluationFeedbackSample]:
+    samples: list[EvaluationFeedbackSample] = []
+    for _, mission, tasks in mission_tasks_by_location:
+        for task in tasks:
+            if (
+                len(samples) < 10
+                and task.id in eligible_terminal_ids
+                and task.feedback_text
+                and task.feedback_text.strip()
+            ):
+                samples.append(
+                    EvaluationFeedbackSample(
+                        mission_title=mission.title,
+                        result=PlanningStatus(task.status),
+                        difficulty_feedback=task.difficulty_feedback,
+                        feedback_text=task.feedback_text,
+                    )
+                )
+    return samples
 
 
 def _mission_summary(

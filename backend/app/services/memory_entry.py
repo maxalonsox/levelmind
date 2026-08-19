@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -69,6 +70,8 @@ def list_recent_task_execution_memories(
     db: Session,
     user_id: UUID,
     goal_id: UUID,
+    *,
+    created_after: datetime | None = None,
 ) -> list[MemoryEntry]:
     get_owned_goal(db, goal_id, user_id)
     statement = (
@@ -79,7 +82,10 @@ def list_recent_task_execution_memories(
             MemoryEntry.memory_type == MemoryType.OBSERVED,
             MemoryEntry.key == "task_execution",
         )
-        .order_by(MemoryEntry.created_at.desc(), MemoryEntry.id.desc())
-        .limit(RECENT_TASK_EXECUTION_MEMORY_LIMIT)
     )
+    if created_after is not None:
+        statement = statement.where(MemoryEntry.created_at > created_after)
+    statement = statement.order_by(
+        MemoryEntry.created_at.desc(), MemoryEntry.id.desc()
+    ).limit(RECENT_TASK_EXECUTION_MEMORY_LIMIT)
     return list(db.scalars(statement))

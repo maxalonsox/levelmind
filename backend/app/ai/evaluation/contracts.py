@@ -120,6 +120,21 @@ class RecentTaskExecutionObservation(BaseModel):
     difficulty_feedback: Difficulty | None
 
 
+class EvaluationEvidenceWindow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cutoff_at: datetime
+    metrics: EvaluationMetrics
+    feedback_metrics: EvaluationFeedbackMetrics
+    temporal_metrics: EvaluationTemporalMetrics
+    missions: list[EvaluationMissionSummary]
+    feedback_samples: list[EvaluationFeedbackSample] = Field(max_length=10)
+    deterministic_signals: list[EvaluationSignal]
+    recent_observed_task_execution_history: list[
+        RecentTaskExecutionObservation
+    ] = Field(default_factory=list, max_length=10)
+
+
 class EvaluationContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -133,6 +148,7 @@ class EvaluationContext(BaseModel):
     recent_observed_task_execution_history: list[
         RecentTaskExecutionObservation
     ] = Field(default_factory=list, max_length=10)
+    adaptation_evidence: EvaluationEvidenceWindow | None = None
 
 
 class EvaluationLLMProvider(Protocol):

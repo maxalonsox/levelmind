@@ -1,16 +1,24 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.orm import Session
 
-from app.ai.evaluation.contracts import EvaluationSignalType
+from app.ai.evaluation.contracts import (
+    EvaluationResult,
+    EvaluationSignalType,
+    EvaluationStatus,
+)
 from app.models.enums import PlanningStatus
 from app.models.goal import Goal
 from app.models.memory_entry import MemoryEntry
 from app.models.mission import Mission
+from app.models.plan_adaptation import PlanAdaptation
+from app.models.plan_revision import PlanRevision
 from app.models.stage import Stage
 from app.models.task import Task
+from app.services.evaluation import EvaluationService
 from app.services.evaluation_context import build_evaluation_context
 
 
@@ -74,6 +82,65 @@ def resolved_task(
 
 def signal_types(context) -> set[EvaluationSignalType]:
     return {signal.type for signal in context.deterministic_signals}
+
+
+def persist_reviewed_adaptation(
+    db: Session,
+    goal: Goal,
+    *,
+    cutoff: datetime,
+    status: str = "accepted",
+    base_revision: PlanRevision | None = None,
+) -> PlanRevision:
+    if base_revision is None:
+        base_revision = PlanRevision(
+            goal_id=goal.id,
+            revision_number=1,
+            snapshot={"stages": []},
+            created_at=cutoff - timedelta(minutes=1),
+        )
+        db.add(base_revision)
+        db.commit()
+    adaptation = PlanAdaptation(
+        goal_id=goal.id,
+        base_revision_id=base_revision.id,
+        proposal={"decision": "propose_changes", "changes": []},
+        status=status,
+        reviewed_at=cutoff,
+    )
+    db.add(adaptation)
+    db.commit()
+    if status != "accepted":
+        return base_revision
+    revision = PlanRevision(
+        goal_id=goal.id,
+        revision_number=base_revision.revision_number + 1,
+        snapshot={"stages": []},
+        base_revision_id=base_revision.id,
+        adaptation_id=adaptation.id,
+        created_at=cutoff,
+    )
+    db.add(revision)
+    db.commit()
+    return revision
+
+
+class OvereagerProvider:
+    def __init__(self, status: EvaluationStatus) -> None:
+        self.status = status
+        self.calls = 0
+
+    async def evaluate(self, _context):
+        self.calls += 1
+        return EvaluationResult(
+            status=self.status,
+            summary="The provider requests another adaptation.",
+            signals=[],
+            needs_adaptation=True,
+        )
+
+    async def close(self) -> None:
+        pass
 
 
 def test_evaluation_context_builds_minimized_metrics_and_summaries(
@@ -295,3 +362,270 @@ def test_evaluation_context_detects_difficulty_cluster_and_missing_feedback(
 
     assert EvaluationSignalType.DIFFICULTY_CLUSTER in signal_types(context)
     assert EvaluationSignalType.INSUFFICIENT_FEEDBACK in signal_types(context)
+
+
+def test_accepted_adaptation_starts_empty_evidence_window_without_losing_history(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    old_time = datetime(2026, 8, 1, 12, tzinfo=UTC)
+    cutoff = old_time + timedelta(days=1)
+    goal = persist_goal(db_session, authenticated_user_id)
+    add_mission(
+        db_session,
+        goal,
+        [
+            resolved_task(
+                f"Old difficult Task {index}",
+                index,
+                difficulty="difficult",
+                resolved_at=old_time,
+            )
+            for index in range(3)
+        ]
+        + [Task(title="Pending revised Task", order_index=3)],
+    )
+    db_session.add(
+        MemoryEntry(
+            user_id=authenticated_user_id,
+            goal_id=goal.id,
+            memory_type="observed",
+            key="task_execution",
+            value={
+                "result": "completed",
+                "estimated_difficulty": "normal",
+                "difficulty_feedback": "difficult",
+            },
+            source_type="task",
+            source_id=uuid4(),
+            confidence=1,
+            created_at=old_time,
+        )
+    )
+    persist_reviewed_adaptation(db_session, goal, cutoff=cutoff)
+
+    context = build_evaluation_context(
+        db_session, goal.id, authenticated_user_id
+    )
+
+    assert context.metrics.resolved_tasks == 3
+    assert context.metrics.xp_earned == 30
+    assert context.feedback_metrics.difficult_count == 3
+    assert len(context.recent_observed_task_execution_history) == 1
+    assert context.adaptation_evidence is not None
+    assert context.adaptation_evidence.metrics.resolved_tasks == 0
+    assert context.adaptation_evidence.metrics.total_tasks == 1
+    assert context.adaptation_evidence.feedback_metrics.difficult_count == 0
+    assert context.adaptation_evidence.deterministic_signals == []
+    assert (
+        context.adaptation_evidence.recent_observed_task_execution_history
+        == []
+    )
+
+    def fail_if_provider_is_built():
+        raise AssertionError("Old evidence must not invoke Evaluation")
+
+    result = asyncio.run(
+        EvaluationService(fail_if_provider_is_built).evaluate(context)
+    )
+    assert result.status is EvaluationStatus.INSUFFICIENT_DATA
+    assert result.needs_adaptation is False
+
+
+def test_one_post_revision_result_is_still_insufficient(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    cutoff = datetime(2026, 8, 5, 12, tzinfo=UTC)
+    goal = persist_goal(db_session, authenticated_user_id)
+    mission = add_mission(
+        db_session,
+        goal,
+        [
+            Task(title="New Task", order_index=0),
+            Task(title="Still pending", order_index=1),
+        ],
+    )
+    persist_reviewed_adaptation(db_session, goal, cutoff=cutoff)
+    mission.tasks[0].status = PlanningStatus.COMPLETED
+    mission.tasks[0].difficulty_feedback = "normal"
+    mission.tasks[0].resolved_at = cutoff + timedelta(minutes=1)
+    db_session.commit()
+
+    context = build_evaluation_context(
+        db_session, goal.id, authenticated_user_id
+    )
+
+    assert context.adaptation_evidence is not None
+    assert context.adaptation_evidence.metrics.resolved_tasks == 1
+
+    def fail_if_provider_is_built():
+        raise AssertionError("One new result must not invoke Evaluation")
+
+    result = asyncio.run(
+        EvaluationService(fail_if_provider_is_built).evaluate(context)
+    )
+    assert result.status is EvaluationStatus.INSUFFICIENT_DATA
+    assert result.needs_adaptation is False
+
+
+def test_normal_post_revision_evidence_overrides_old_problematic_history(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    old_time = datetime(2026, 8, 1, 12, tzinfo=UTC)
+    cutoff = old_time + timedelta(days=1)
+    goal = persist_goal(db_session, authenticated_user_id)
+    mission = add_mission(
+        db_session,
+        goal,
+        [
+            resolved_task(
+                f"Old difficult Task {index}",
+                index,
+                difficulty="difficult",
+                resolved_at=old_time,
+            )
+            for index in range(3)
+        ]
+        + [
+            Task(title=f"New normal Task {index}", order_index=index + 3)
+            for index in range(3)
+        ],
+    )
+    persist_reviewed_adaptation(db_session, goal, cutoff=cutoff)
+    for task in mission.tasks[3:]:
+        task.status = PlanningStatus.COMPLETED
+        task.difficulty_feedback = "normal"
+        task.resolved_at = cutoff + timedelta(minutes=task.order_index)
+    db_session.commit()
+
+    context = build_evaluation_context(
+        db_session, goal.id, authenticated_user_id
+    )
+    provider = OvereagerProvider(EvaluationStatus.STRUGGLING)
+    result = asyncio.run(
+        EvaluationService(lambda: provider).evaluate(context)
+    )
+
+    assert context.feedback_metrics.difficult_count == 3
+    assert context.adaptation_evidence is not None
+    assert context.adaptation_evidence.metrics.resolved_tasks == 3
+    assert context.adaptation_evidence.feedback_metrics.normal_count == 3
+    assert result.status is EvaluationStatus.ON_TRACK
+    assert result.needs_adaptation is False
+    assert provider.calls == 1
+
+
+@pytest.mark.parametrize(
+    ("statuses", "difficulties", "expected_signal"),
+    [
+        (
+            ["skipped", "skipped", "completed"],
+            ["normal", "normal", "normal"],
+            EvaluationSignalType.FREQUENT_SKIPS,
+        ),
+        (
+            ["completed", "completed", "completed"],
+            ["difficult", "difficult", "normal"],
+            EvaluationSignalType.HIGH_DIFFICULTY,
+        ),
+    ],
+)
+def test_problematic_post_revision_evidence_can_enable_adaptation_again(
+    statuses: list[str],
+    difficulties: list[str],
+    expected_signal: EvaluationSignalType,
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    cutoff = datetime(2026, 8, 5, 12, tzinfo=UTC)
+    goal = persist_goal(db_session, authenticated_user_id)
+    mission = add_mission(
+        db_session,
+        goal,
+        [Task(title=f"New Task {index}", order_index=index) for index in range(3)],
+    )
+    persist_reviewed_adaptation(db_session, goal, cutoff=cutoff)
+    for index, task in enumerate(mission.tasks):
+        task.status = statuses[index]
+        task.difficulty_feedback = difficulties[index]
+        task.resolved_at = cutoff + timedelta(minutes=index + 1)
+    db_session.commit()
+
+    context = build_evaluation_context(
+        db_session, goal.id, authenticated_user_id
+    )
+    provider = OvereagerProvider(EvaluationStatus.STRUGGLING)
+    result = asyncio.run(
+        EvaluationService(lambda: provider).evaluate(context)
+    )
+
+    assert context.adaptation_evidence is not None
+    assert expected_signal in {
+        signal.type
+        for signal in context.adaptation_evidence.deterministic_signals
+    }
+    assert result.needs_adaptation is True
+
+
+def test_rejected_adaptation_does_not_create_cutoff_and_latest_acceptance_wins(
+    db_session: Session,
+    authenticated_user_id: UUID,
+) -> None:
+    first_cutoff = datetime(2026, 8, 3, 12, tzinfo=UTC)
+    second_cutoff = first_cutoff + timedelta(days=1)
+    goal = persist_goal(db_session, authenticated_user_id)
+    mission = add_mission(
+        db_session,
+        goal,
+        [
+            resolved_task(
+                "Before latest revision",
+                0,
+                difficulty="difficult",
+                resolved_at=first_cutoff + timedelta(hours=1),
+            ),
+            resolved_task(
+                "After latest revision",
+                1,
+                difficulty="normal",
+                resolved_at=second_cutoff + timedelta(hours=1),
+            ),
+        ],
+    )
+    rejected_goal = persist_goal(db_session, uuid4())
+    add_mission(
+        db_session,
+        rejected_goal,
+        [resolved_task("Historical evidence", 0, difficulty="difficult")],
+    )
+    persist_reviewed_adaptation(
+        db_session,
+        rejected_goal,
+        cutoff=first_cutoff,
+        status="rejected",
+    )
+    rejected_context = build_evaluation_context(
+        db_session, rejected_goal.id, rejected_goal.user_id
+    )
+
+    first_revision = persist_reviewed_adaptation(
+        db_session, goal, cutoff=first_cutoff
+    )
+    latest_revision = persist_reviewed_adaptation(
+        db_session,
+        goal,
+        cutoff=second_cutoff,
+        base_revision=first_revision,
+    )
+    context = build_evaluation_context(
+        db_session, goal.id, authenticated_user_id
+    )
+
+    assert rejected_context.adaptation_evidence is None
+    assert context.adaptation_evidence is not None
+    assert context.adaptation_evidence.cutoff_at == latest_revision.created_at
+    assert context.adaptation_evidence.metrics.resolved_tasks == 1
+    assert context.adaptation_evidence.feedback_metrics.normal_count == 1
+    assert mission.tasks[0].status == PlanningStatus.COMPLETED

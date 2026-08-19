@@ -3,7 +3,9 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.models.enums import AdaptationStatus
 from app.models.mission import Mission
+from app.models.plan_adaptation import PlanAdaptation
 from app.models.plan_revision import PlanRevision
 from app.models.stage import Stage
 from app.schemas.plan_revision import PlanRevisionSnapshot
@@ -43,6 +45,25 @@ def get_current_plan_revision(
     if for_update:
         statement = statement.with_for_update()
     return db.scalar(statement)
+
+
+def get_latest_applied_adaptation_revision(
+    db: Session,
+    goal_id: UUID,
+) -> PlanRevision | None:
+    return db.scalar(
+        select(PlanRevision)
+        .join(
+            PlanAdaptation,
+            PlanRevision.adaptation_id == PlanAdaptation.id,
+        )
+        .where(
+            PlanRevision.goal_id == goal_id,
+            PlanAdaptation.status == AdaptationStatus.ACCEPTED,
+        )
+        .order_by(PlanRevision.revision_number.desc())
+        .limit(1)
+    )
 
 
 def create_plan_revision(

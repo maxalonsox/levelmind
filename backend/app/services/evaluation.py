@@ -6,7 +6,9 @@ from pydantic import BaseModel, ValidationError
 
 from app.ai.evaluation.contracts import (
     EvaluationContext,
+    EvaluationFeedbackMetrics,
     EvaluationLLMProvider,
+    EvaluationMetrics,
     EvaluationResult,
     EvaluationStatus,
 )
@@ -101,8 +103,7 @@ def _apply_evidence_guardrails(
 
 
 def _is_normal_execution(context: EvaluationContext) -> bool:
-    metrics = context.metrics
-    feedback = context.feedback_metrics
+    metrics, feedback = _decision_evidence(context)
     enough_feedback = feedback.tasks_with_difficulty_feedback >= max(
         2, round(metrics.resolved_tasks * 0.5)
     )
@@ -119,15 +120,27 @@ def _is_normal_execution(context: EvaluationContext) -> bool:
 def _has_persistent_adaptation_evidence(
     context: EvaluationContext,
 ) -> bool:
-    if context.metrics.resolved_tasks < 3:
+    metrics, feedback = _decision_evidence(context)
+    if metrics.resolved_tasks < 3:
         return False
 
-    skipped = context.metrics.skipped_tasks
-    difficult = context.feedback_metrics.difficult_count
-    easy = context.feedback_metrics.easy_count
+    skipped = metrics.skipped_tasks
+    difficult = feedback.difficult_count
+    easy = feedback.easy_count
     return (
         skipped >= 2
         or difficult >= 2
         or easy >= 3
         or (skipped >= 1 and difficult >= 1)
     )
+
+
+def _decision_evidence(
+    context: EvaluationContext,
+) -> tuple[EvaluationMetrics, EvaluationFeedbackMetrics]:
+    if context.adaptation_evidence is not None:
+        return (
+            context.adaptation_evidence.metrics,
+            context.adaptation_evidence.feedback_metrics,
+        )
+    return context.metrics, context.feedback_metrics
